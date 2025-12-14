@@ -1,0 +1,50 @@
+[
+  {
+    "id": "1",
+    "name": "Bianca Zeebregts",
+    "email": "bianca.zeebregts@example.com",
+    "phone": "",
+    "status": "Actief",
+    "balance": 0
+  },
+  {
+    "id": "2",
+    "name": "Emma Zandwijk",
+    "email": "emma.zandwijk@example.com",
+    "phone": "",
+    "status": "Actief",
+    "balance": 0
+  },
+  {
+    "id": "3",
+    "name": "Jane Zon",
+    "email": "jane.zon@example.com",
+    "phone": "",
+    "status": "Actief",
+    "balance": 0
+  },
+  {
+    "id": "4",
+    "name": "Marie Louise Wouw",
+    "email": "marie louise.wouw@example.com",
+    "phone": "",
+    "status": "Actief",
+    "balance": 0
+  },
+  {
+    "id": "5",
+    "name": "Marie Wouw",
+    "email": "marie.wouw@example.com",
+    "phone": "",
+    "status": "Actief",
+    "balance": 0
+  },
+  {
+    "id": "6",
+    "name": "Nicole Wijgerse",
+    "email": "nicole.wijgerse@example.com",
+    "phone": "",
+    "status": "Actief",
+    "balance": 0
+  }
+]

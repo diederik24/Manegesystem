@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-primary: #ec4899;
+    --brand-hover: #db2777;
+    --brand-dark: #1e293b;
+    --brand-soft: #fce7f3;
+    --brand-bg: #f8fafc;
+  }
+}
+
+@layer utilities {
+  .text-brand-primary {
+    color: var(--brand-primary);
+  }
+  
+  .bg-brand-primary {
+    background-color: var(--brand-primary);
+  }
+  
+  .text-brand-dark {
+    color: var(--brand-dark);
+  }
+  
+  .bg-brand-dark {
+    background-color: var(--brand-dark);
+  }
+  
+  .bg-brand-soft {
+    background-color: var(--brand-soft);
+  }
+  
+  .bg-brand-bg {
+    background-color: var(--brand-bg);
+  }
+  
+  .border-brand-soft {
+    border-color: var(--brand-soft);
+  }
+  
+  .hover\:bg-brand-hover:hover {
+    background-color: var(--brand-hover);
+  }
+  
+  .hover\:text-brand-primary:hover {
+    color: var(--brand-primary);
+  }
+  
+  .shadow-soft {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+  
+  .shadow-brand-primary\/30 {
+    box-shadow: 0 4px 12px rgba(236, 72, 153, 0.3);
+  }
+}
+

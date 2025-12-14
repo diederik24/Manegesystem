@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manege Kalender 2026</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🐴 Manege Kalender 2026</h1>
+            <div class="header-controls">
+                <select id="monthSelector">
+                    <option value="0">Januari</option>
+                    <option value="1">Februari</option>
+                    <option value="2">Maart</option>
+                    <option value="3">April</option>
+                    <option value="4">Mei</option>
+                    <option value="5">Juni</option>
+                    <option value="6">Juli</option>
+                    <option value="7">Augustus</option>
+                    <option value="8">September</option>
+                    <option value="9">Oktober</option>
+                    <option value="10">November</option>
+                    <option value="11">December</option>
+                </select>
+                <button id="quarterViewBtn" class="btn-secondary">Kwartaaloverzicht</button>
+                <button id="yearViewBtn" class="btn-secondary">Jaaroverzicht</button>
+            </div>
+        </header>
+
+        <div id="calendarView" class="calendar-view">
+            <div class="calendar-grid" id="calendarGrid"></div>
+        </div>
+
+        <div id="quarterView" class="quarter-view hidden">
+            <div class="quarter-info" id="quarterInfo"></div>
+            <div class="calendar-grid" id="quarterGrid"></div>
+        </div>
+
+        <div id="yearView" class="year-view hidden">
+            <div class="year-grid" id="yearGrid"></div>
+        </div>
+
+        <!-- Modal voor activiteit toevoegen/bewerken -->
+        <div id="activityModal" class="modal hidden">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2 id="modalTitle">Activiteit Toevoegen</h2>
+                <form id="activityForm">
+                    <input type="hidden" id="activityDate" name="date">
+                    <input type="hidden" id="activityId" name="id">
+                    
+                    <div class="form-group">
+                        <label for="activityType">Type Activiteit:</label>
+                        <select id="activityType" name="type" required>
+                            <option value="springles">Springles</option>
+                            <option value="dressuurles">Dressuurles</option>
+                            <option value="schriktraining">Schriktraining</option>
+                            <option value="westernles">Westernles</option>
+                            <option value="voltigeles">Voltigeles</option>
+                            <option value="ponyles">Ponyles</option>
+                            <option value="theorieles">Theorieles</option>
+                            <option value="paardenkennis">Paardenkennis</option>
+                            <option value="verzorging">Verzorging & Verzorging</option>
+                            <option value="wedstrijd">Wedstrijd</option>
+                            <option value="training">Training</option>
+                            <option value="onderhoud">Onderhoud</option>
+                            <option value="overig">Overig</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="activityTime">Tijd:</label>
+                        <input type="time" id="activityTime" name="time" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="activityTitle">Titel:</label>
+                        <input type="text" id="activityTitle" name="title" placeholder="Bijv. Springles beginners" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="activityDescription">Beschrijving:</label>
+                        <textarea id="activityDescription" name="description" rows="3" placeholder="Optionele beschrijving..."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="activityInstructor">Instructeur:</label>
+                        <input type="text" id="activityInstructor" name="instructor" placeholder="Naam instructeur">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">Opslaan</button>
+                        <button type="button" class="btn-secondary" id="cancelBtn">Annuleren</button>
+                        <button type="button" class="btn-danger hidden" id="deleteBtn">Verwijderen</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Activiteit details modal -->
+        <div id="detailsModal" class="modal hidden">
+            <div class="modal-content">
+                <span class="close-details">&times;</span>
+                <div id="activityDetails"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
