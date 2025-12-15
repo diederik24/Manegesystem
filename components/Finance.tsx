@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
-import { Download, Plus, Search, FileText, TrendingUp, CreditCard, Mail, CheckCircle, AlertCircle, Filter, X, Calendar, User, Clock, Send } from 'lucide-react';
+import { Download, Plus, Search, FileText, TrendingUp, CreditCard, Mail, CheckCircle, AlertCircle, Filter, X, Calendar, User, Clock, Send, Eye } from 'lucide-react';
 import { MOCK_TRANSACTIONS, MOCK_FACTUREN } from '../constants';
-import { Factuur } from '../types';
+import { Factuur, ViewState } from '../types';
 
-const Finance: React.FC = () => {
+interface FinanceProps {
+  onNavigate?: (view: ViewState) => void;
+}
+
+const Finance: React.FC<FinanceProps> = ({ onNavigate }) => {
   const [activeTab, setActiveTab] = useState<'overzicht' | 'openstaand' | 'betaald' | 'achterstallig'>('overzicht');
   const [klantTypeFilter, setKlantTypeFilter] = useState<'Alle' | 'Pension' | 'Manege'>('Alle');
   const [searchTerm, setSearchTerm] = useState('');
@@ -163,9 +167,12 @@ const Finance: React.FC = () => {
           )}
         </div>
         <div className="flex space-x-3">
-          <button className="flex items-center space-x-2 px-5 py-2.5 bg-white border border-brand-soft/50 text-slate-600 rounded-2xl hover:bg-brand-bg shadow-sm transition-colors">
-            <Download className="w-4 h-4" />
-            <span>Export SEPA</span>
+          <button 
+            onClick={() => onNavigate && onNavigate(ViewState.FACTURATIE_BEKIJKEN)}
+            className="flex items-center space-x-2 px-5 py-2.5 bg-white border border-brand-soft/50 text-slate-600 rounded-2xl hover:bg-brand-bg shadow-sm transition-colors"
+          >
+            <Eye className="w-4 h-4" />
+            <span>Facturatie bekijken</span>
           </button>
           <button className="flex items-center space-x-2 px-6 py-2.5 bg-brand-primary hover:bg-brand-hover text-white rounded-2xl shadow-soft shadow-brand-primary/30 transition-all transform hover:scale-105">
             <Plus className="w-4 h-4" />

@@ -13,6 +13,7 @@ import Rapportages from './components/Rapportages';
 import HelpInfo from './components/HelpInfo';
 import ZorgWelzijn from './components/ZorgWelzijn';
 import PlanningBeheer from './components/PlanningBeheer';
+import FacturatieBekijken from './components/FacturatieBekijken';
 import { ViewState } from './types';
 
 const App: React.FC = () => {
@@ -29,7 +30,9 @@ const App: React.FC = () => {
       case ViewState.STAMGEGEVENS:
         return <Stamgegevens />;
       case ViewState.FINANCIEEL:
-        return <Finance />;
+        return <Finance onNavigate={setCurrentView} />;
+      case ViewState.FACTURATIE_BEKIJKEN:
+        return <FacturatieBekijken onNavigate={setCurrentView} />;
       case ViewState.RAPPORTAGES:
         return <Rapportages />;
       case ViewState.LESKAARTEN:

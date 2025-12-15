@@ -1,0 +1,54 @@
+[33mcommit 8a2997fb9e2fe60ac5cb12fd1150c9fb1f46c642[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: diederik24 <diederik24@icloud.com>
+Date:   Mon Dec 15 19:37:11 2025 +0100
+
+    Add pension klanten import, factuur instellingen, en klant detail modal
+    
+    - Import functionaliteit voor pension klanten uit Excel bestand
+    - Supabase integratie voor members en horses tabellen
+    - Klant detail modal met bewerk functionaliteit
+    - Factuur instellingen: toggle voor factuur ontvangen en factuur email
+    - Stamgegevens component met tabs voor Pension/Manege klanten
+    - Database migrations voor nieuwe velden (adres, factuur velden)
+    - Paarden koppeling aan klanten
+    - Zorg & Welzijn pagina voor paarden zorg
+    - Planning Beheer pagina voor dagelijkse planning
+
+App.tsx
+IMPORT-INSTRUCTIES.md
+Pension Klanten bestand 2025.xlsx
+components/Consumptie.tsx
+components/Dashboard.tsx
+components/DatabaseTest.tsx
+components/Finance.tsx
+components/HelpInfo.tsx
+components/Instellingen.tsx
+components/Layout.tsx
+components/Leskaarten.tsx
+components/NieuweAanmeldingen.tsx
+components/Pensionstalling.tsx
+components/Planning.tsx
+components/PlanningBeheer.tsx
+components/Rapportages.tsx
+components/Stamgegevens.tsx
+components/ZorgWelzijn.tsx
+constants.ts
+create-horses-table.sql
+database-migration-factuur-velden.sql
+database-migration-pension-klanten.sql
+database.sql
+database_4_commands.sql
+factuur-voorbeeld.html
+fix-horse-owners.js
+import-pension-klanten-to-supabase.js
+import-pension-klanten.js
+import-pension-klanten.sql
+lib/supabase.ts
+package.json
+pension-klanten-parsed.json
+postcss.config.cjs
+setup-rls-policies.sql
+tailwind.config.js
+test-connection.js
+test-db.js
+types.ts

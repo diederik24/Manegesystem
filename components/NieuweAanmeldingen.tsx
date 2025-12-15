@@ -1,42 +1,173 @@
-import React, { useState } from 'react';
-import { Mail, Phone, Calendar, User, Check, X, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Mail, Phone, Calendar, User, Check, X, Clock, MapPin, BirthdayCake } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+
+interface Aanmelding {
+  id: string;
+  voorletters: string | null;
+  voornaam: string;
+  tussenvoegsel: string | null;
+  achternaam: string;
+  geboortedatum: string | null;
+  adres: string | null;
+  postcode: string | null;
+  plaats: string | null;
+  email: string;
+  telefoon1: string | null;
+  telefoon2: string | null;
+  noodcontact_naam: string | null;
+  noodcontact_telefoon: string | null;
+  opmerking: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+}
 
 const NieuweAanmeldingen: React.FC = () => {
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [applications, setApplications] = useState<Aanmelding[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
-  const mockApplications = [
-    { 
-      id: '1', 
-      name: 'Emma van Zandwijk', 
-      email: 'hestervanzandwijk@gmail.com', 
-      phone: '06 19075588',
-      date: '2025-12-15',
-      status: 'pending',
-      message: 'Interesse in privélessen'
-    },
-    { 
-      id: '2', 
-      name: 'Jane van Zon', 
-      email: 'Jane.vanzon@gmail.com', 
-      phone: '0623831581',
-      date: '2025-12-14',
-      status: 'approved',
-      message: 'Wil graag starten met groepslessen'
-    },
-    { 
-      id: '3', 
-      name: 'Dewi van Zwol-Lakerveld', 
-      email: 'd.lakerveld@outlook.com', 
-      phone: '0623768102',
-      date: '2025-12-13',
-      status: 'pending',
-      message: 'Vraag over pensionstalling'
-    },
-  ];
+  useEffect(() => {
+    fetchApplications();
+  }, []);
+
+  const fetchApplications = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('nieuwe_aanmeldingen')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching applications:', error);
+        return;
+      }
+
+      setApplications(data || []);
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprove = async (aanmelding: Aanmelding) => {
+    if (!window.confirm(`Weet je zeker dat je ${aanmelding.voornaam} ${aanmelding.achternaam} wilt goedkeuren? Deze persoon wordt toegevoegd aan het stambestand als Manegeklant.`)) {
+      return;
+    }
+
+    try {
+      setProcessingId(aanmelding.id);
+
+      // Maak volledige naam
+      const fullName = [
+        aanmelding.voorletters,
+        aanmelding.voornaam,
+        aanmelding.tussenvoegsel,
+        aanmelding.achternaam
+      ].filter(Boolean).join(' ');
+
+      // Voeg toe aan members tabel als Manegeklant
+      const { error: memberError } = await supabase
+        .from('members')
+        .insert([
+          {
+            name: fullName,
+            email: aanmelding.email,
+            phone: aanmelding.telefoon1 || aanmelding.telefoon2 || null,
+            status: 'Actief',
+            klant_type: 'Manege',
+            adres: aanmelding.adres || null,
+            postcode: aanmelding.postcode || null,
+            plaats: aanmelding.plaats || null,
+            balance: 0.00
+          }
+        ]);
+
+      if (memberError) {
+        // Als email al bestaat, update dan de bestaande member
+        if (memberError.code === '23505') {
+          const { error: updateError } = await supabase
+            .from('members')
+            .update({
+              name: fullName,
+              phone: aanmelding.telefoon1 || aanmelding.telefoon2 || null,
+              status: 'Actief',
+              klant_type: 'Manege',
+              adres: aanmelding.adres || null,
+              postcode: aanmelding.postcode || null,
+              plaats: aanmelding.plaats || null
+            })
+            .eq('email', aanmelding.email);
+
+          if (updateError) {
+            throw updateError;
+          }
+        } else {
+          throw memberError;
+        }
+      }
+
+      // Update status van aanmelding naar approved
+      const { error: updateError } = await supabase
+        .from('nieuwe_aanmeldingen')
+        .update({ status: 'approved' })
+        .eq('id', aanmelding.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Refresh de lijst
+      await fetchApplications();
+    } catch (error: any) {
+      console.error('Error approving application:', error);
+      alert(`Fout bij goedkeuren: ${error.message}`);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleReject = async (aanmelding: Aanmelding) => {
+    if (!window.confirm(`Weet je zeker dat je ${aanmelding.voornaam} ${aanmelding.achternaam} wilt afwijzen?`)) {
+      return;
+    }
+
+    try {
+      setProcessingId(aanmelding.id);
+
+      const { error } = await supabase
+        .from('nieuwe_aanmeldingen')
+        .update({ status: 'rejected' })
+        .eq('id', aanmelding.id);
+
+      if (error) {
+        throw error;
+      }
+
+      await fetchApplications();
+    } catch (error: any) {
+      console.error('Error rejecting application:', error);
+      alert(`Fout bij afwijzen: ${error.message}`);
+    } finally {
+      setProcessingId(null);
+    }
+  };
 
   const filteredApplications = selectedFilter === 'all' 
-    ? mockApplications 
-    : mockApplications.filter(app => app.status === selectedFilter);
+    ? applications 
+    : applications.filter(app => app.status === selectedFilter);
+
+  const formatName = (aanmelding: Aanmelding) => {
+    return [
+      aanmelding.voorletters,
+      aanmelding.voornaam,
+      aanmelding.tussenvoegsel,
+      aanmelding.achternaam
+    ].filter(Boolean).join(' ');
+  };
 
   return (
     <div className="space-y-8">
