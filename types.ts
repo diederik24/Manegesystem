@@ -8,7 +8,10 @@ export enum ViewState {
   PENSIONSTALLING = 'PENSIONSTALLING',
   NIEUWE_AANMELDINGEN = 'NIEUWE_AANMELDINGEN',
   CONSUMPTIE = 'CONSUMPTIE',
-  INSTELLINGEN = 'INSTELLINGEN'
+  INSTELLINGEN = 'INSTELLINGEN',
+  HELP_INFO = 'HELP_INFO',
+  ZORG_WELZIJN = 'ZORG_WELZIJN',
+  PLANNING_BEHEER = 'PLANNING_BEHEER'
 }
 
 export interface Horse {
@@ -28,6 +31,7 @@ export interface Member {
   phone: string;
   status: 'Actief' | 'Wachtlijst' | 'Inactief';
   balance: number;
+  klantType?: 'Pension' | 'Manege';
 }
 
 export interface Lesson {
@@ -51,4 +55,92 @@ export interface Transaction {
   status: 'Open' | 'Betaald' | 'Verwerkt';
   memberId: string;
   memberName: string;
+}
+
+export interface Factuur {
+  id: string;
+  factuurnummer: string;
+  klantId: string;
+  klantNaam: string;
+  klantEmail: string;
+  klantType: 'Pension' | 'Manege';
+  datum: string;
+  vervaldatum: string;
+  bedrag: number;
+  omschrijving: string;
+  status: 'Open' | 'Betaald' | 'Verwerkt' | 'Achterstallig';
+  betaaldOp?: string;
+  eersteHerinneringVerstuurd?: string;
+  tweedeHerinneringVerstuurd?: string;
+  aantalHerinneringen: number;
+}
+
+export interface ConsumptieItem {
+  id: string;
+  naam: string;
+  prijs: number;
+  aantal: number;
+  totaal: number;
+}
+
+export interface ConsumptieKaart {
+  id: string;
+  klantId: string;
+  klantNaam: string;
+  klantEmail: string;
+  datum: string;
+  items: ConsumptieItem[];
+  totaalBedrag: number;
+  status: 'open' | 'klaar_voor_facturatie' | 'betaalverzoek_verstuurd' | 'betaald';
+  molliePaymentId?: string;
+}
+
+export interface RecurringLesson {
+  id: string;
+  name: string; // Groep naam (bijv. "Groep1")
+  dayOfWeek: number; // 0 = Maandag, 6 = Zondag
+  time: string; // HH:MM
+  type: string; // Type les
+  instructor?: string;
+  maxParticipants: number;
+  color: 'blue' | 'teal' | 'orange' | 'amber' | 'green' | 'purple' | 'pink' | 'indigo';
+  description?: string;
+  participantIds: string[]; // IDs van klanten die deelnemen
+}
+
+export interface LessonInstance {
+  id: string;
+  recurringLessonId: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
+  participantIds: string[]; // IDs van klanten die deze specifieke les volgen
+}
+
+export interface Leskaart {
+  id: string;
+  klantId: string;
+  klantNaam: string;
+  totaalLessen: number;
+  gebruikteLessen: number;
+  resterendeLessen: number;
+  startDatum: string;
+  eindDatum: string;
+  status: 'actief' | 'opgebruikt' | 'verlopen';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface LesRegistratie {
+  id: string;
+  leskaartId: string;
+  klantId: string;
+  lesEventId: string; // ID van de CalendarEvent
+  lesDatum: string; // YYYY-MM-DD
+  lesTijd: string; // HH:MM
+  lesDuur: number; // minuten (standaard 60)
+  status: 'gepland' | 'gereden' | 'afgezegd' | 'niet_geteld';
+  automatischAfgeschreven: boolean;
+  afgemeldOp?: string; // timestamp wanneer afgemeld
+  aangepastOp?: string; // timestamp laatste aanpassing
+  created_at?: string;
 }

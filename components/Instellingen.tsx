@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Settings, User, Mail, Bell, Shield, Save } from 'lucide-react';
+import DatabaseTest from './DatabaseTest';
+import { Settings, User, Mail, Bell, Shield, Save, Database } from 'lucide-react';
 
 const Instellingen: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'general' | 'users' | 'notifications' | 'security'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'users' | 'notifications' | 'security' | 'database'>('general');
 
   return (
     <div className="space-y-8">
@@ -21,6 +22,7 @@ const Instellingen: React.FC = () => {
               { key: 'users', label: 'Gebruikers', icon: User },
               { key: 'notifications', label: 'Notificaties', icon: Bell },
               { key: 'security', label: 'Beveiliging', icon: Shield },
+              { key: 'database', label: 'Database', icon: Database },
             ].map((tab) => {
               const Icon = tab.icon;
               return (
@@ -128,6 +130,13 @@ const Instellingen: React.FC = () => {
                   <Shield className="w-16 h-16 mx-auto mb-4 text-slate-300" />
                   <p>Beveiligingsinstellingen komen binnenkort beschikbaar.</p>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'database' && (
+              <div className="space-y-6">
+                <h2 className="text-2xl font-bold text-brand-dark mb-6">Database Verbinding</h2>
+                <DatabaseTest />
               </div>
             )}
           </div>

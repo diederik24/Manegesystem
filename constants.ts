@@ -1,4 +1,4 @@
-import { Horse, Lesson, Member, Transaction } from './types';
+import { Horse, Lesson, Member, Transaction, Factuur } from './types';
 
 export const MOCK_HORSES: Horse[] = [
   { id: '1', name: 'Bartje', breed: 'Onbekend', birthDate: '2007-01-03', available: true, type: 'Manege' },
@@ -21,12 +21,7 @@ export const MOCK_HORSES: Horse[] = [
   { id: '18', name: 'Vina', breed: 'Fra Liberte', birthDate: '', available: true, type: 'Manege' },
 ];
 
-export const MOCK_MEMBERS: Member[] = [
-  { id: '1', name: 'Anne de Vries', email: 'anne@example.com', phone: '06-12345678', status: 'Actief', balance: 0 },
-  { id: '2', name: 'Peter Smit', email: 'peter@example.com', phone: '06-87654321', status: 'Actief', balance: -25.50 },
-  { id: '3', name: 'Sophie Bakker', email: 'sophie@example.com', phone: '06-11223344', status: 'Wachtlijst', balance: 0 },
-  { id: '4', name: 'Klaas Visser', email: 'klaas@example.com', phone: '06-55667788', status: 'Actief', balance: 120.00 },
-];
+export const MOCK_MEMBERS: Member[] = [];
 
 export const MOCK_LESSONS: Lesson[] = [
   { id: '1', day: 'Vandaag', time: '09:00', duration: 60, instructor: 'Marieke', arena: 'Binnenbak 1', maxRiders: 8, currentRiders: 6, type: 'Groepsles' },
@@ -36,11 +31,7 @@ export const MOCK_LESSONS: Lesson[] = [
   { id: '5', day: 'Vandaag', time: '19:00', duration: 60, instructor: 'Sarah', arena: 'Binnenbak 1', maxRiders: 10, currentRiders: 9, type: 'Groepsles' },
 ];
 
-export const MOCK_TRANSACTIONS: Transaction[] = [
-  { id: '101', date: '2023-10-24', description: 'Leskaart 10-ritten', amount: 150.00, type: 'Factuur', status: 'Betaald', memberId: '1', memberName: 'Anne de Vries' },
-  { id: '102', date: '2023-10-25', description: 'Stalling Oktober', amount: 450.00, type: 'Incasso', status: 'Verwerkt', memberId: '5', memberName: 'J. Jansen' },
-  { id: '103', date: '2023-10-26', description: 'Losse les', amount: 20.00, type: 'Factuur', status: 'Open', memberId: '2', memberName: 'Peter Smit' },
-];
+export const MOCK_TRANSACTIONS: Transaction[] = [];
 
 export const CHART_DATA = [
   { name: 'Ma', lessen: 12, omzet: 800 },
@@ -51,3 +42,5 @@ export const CHART_DATA = [
   { name: 'Za', lessen: 22, omzet: 2100 },
   { name: 'Zo', lessen: 10, omzet: 900 },
 ];
+
+export const MOCK_FACTUREN: Factuur[] = [];

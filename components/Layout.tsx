@@ -138,6 +138,12 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onNavigate, children }) =>
               isActive={currentView === ViewState.CONSUMPTIE} 
               onClick={() => { onNavigate(ViewState.CONSUMPTIE); setIsMobileMenuOpen(false); }}
             />
+            <NavItem 
+              icon={Heart} 
+              label="Zorg & Welzijn" 
+              isActive={currentView === ViewState.ZORG_WELZIJN} 
+              onClick={() => { onNavigate(ViewState.ZORG_WELZIJN); setIsMobileMenuOpen(false); }}
+            />
             
             <div className="mt-8 mb-4 text-xs font-bold text-brand-primary/60 uppercase tracking-widest px-4">Systeem</div>
             <NavItem 
@@ -146,11 +152,11 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onNavigate, children }) =>
               isActive={currentView === ViewState.INSTELLINGEN} 
               onClick={() => { onNavigate(ViewState.INSTELLINGEN); setIsMobileMenuOpen(false); }}
             />
-             <NavItem 
+            <NavItem 
               icon={HelpCircle} 
-              label="Help & Info" 
-              isActive={false} 
-              onClick={() => { alert('Manege Duiksehoef Info:\nSoftware voor een warm thuisgevoel.'); }}
+              label="Help & Info"
+              isActive={currentView === ViewState.HELP_INFO}
+              onClick={() => { onNavigate(ViewState.HELP_INFO); setIsMobileMenuOpen(false); }}
             />
           </div>
 
@@ -158,7 +164,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onNavigate, children }) =>
           <div className="p-6">
              <div className="flex items-center p-3 rounded-3xl bg-brand-bg border border-brand-soft/50">
                <div className="w-10 h-10 rounded-full bg-brand-soft flex items-center justify-center text-brand-primary font-bold mr-3 shadow-sm">
-                 JD
+                 EV
                </div>
                <div className="flex-1 min-w-0">
                  <p className="text-sm font-bold text-brand-dark truncate">Esmée Versteeg</p>

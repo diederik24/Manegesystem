@@ -8,25 +8,41 @@ import {
   Tooltip, 
   ResponsiveContainer,
 } from 'recharts';
-import { Users, Calendar, DollarSign, Activity, AlertCircle, Heart } from 'lucide-react';
+import { Users, Calendar, DollarSign, Activity, AlertCircle, Heart, Euro } from 'lucide-react';
 import { CHART_DATA } from '../constants';
+import { ViewState } from '../types';
 
-const StatCard: React.FC<{ title: string; value: string; subtext: string; icon: React.ElementType }> = ({ 
-  title, value, subtext, icon: Icon 
+const StatCard: React.FC<{ 
+  title: string; 
+  value: string; 
+  subtext: string; 
+  icon: React.ElementType;
+  onClick?: () => void;
+}> = ({ 
+  title, value, subtext, icon: Icon, onClick
 }) => (
-  <div className="bg-white p-6 rounded-3xl shadow-soft border border-transparent hover:border-brand-soft/50 transition-all duration-300 flex items-start justify-between group">
+  <div 
+    onClick={onClick}
+    className={`bg-white p-6 rounded-3xl shadow-soft border border-transparent transition-all duration-300 flex items-start justify-between group ${
+      onClick ? 'cursor-pointer hover:border-brand-primary/50 hover:shadow-lg hover:scale-[1.02]' : 'hover:border-brand-soft/50'
+    }`}
+  >
     <div>
       <p className="text-slate-500 text-sm font-medium mb-2">{title}</p>
       <h3 className="text-3xl font-bold text-brand-dark mb-2">{value}</h3>
       <p className="text-slate-400 text-xs">{subtext}</p>
     </div>
-    <div className="p-4 rounded-2xl bg-brand-bg text-brand-primary group-hover:bg-brand-primary group-hover:text-white transition-colors duration-300 shadow-sm">
-      <Icon className="w-6 h-6" />
+    <div className={`p-4 rounded-2xl bg-brand-bg transition-colors duration-300 shadow-sm ${onClick ? 'group-hover:bg-brand-primary' : ''}`}>
+      <Icon className={`w-5 h-5 transition-colors duration-300 ${onClick ? 'text-slate-400 group-hover:text-white' : 'text-slate-400 group-hover:text-brand-primary'}`} />
     </div>
   </div>
 );
 
-const Dashboard: React.FC = () => {
+interface DashboardProps {
+  onNavigate?: (view: ViewState) => void;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
@@ -42,30 +58,45 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Let op meldingen */}
+      <div className="bg-gradient-to-r from-orange-50 to-orange-100/50 border-2 border-orange-200 rounded-3xl p-6 flex items-start shadow-soft">
+        <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center flex-shrink-0 mr-4 shadow-sm">
+          <AlertCircle className="w-6 h-6 text-white" />
+        </div>
+        <div className="flex-1">
+          <p className="text-base font-bold text-orange-900 mb-1">Let op</p>
+          <p className="text-sm text-orange-800 leading-relaxed">Deze maand moet de ontworming gedaan worden</p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           title="Lessen Vandaag" 
           value="18" 
           subtext="2 lessen vereisen aandacht" 
-          icon={Calendar} 
+          icon={Calendar}
+          onClick={() => onNavigate && onNavigate(ViewState.PLANNING)}
         />
         <StatCard 
           title="Actieve Ruiters" 
           value="452" 
           subtext="+12 nieuwe ruiters deze maand" 
-          icon={Users} 
+          icon={Users}
+          onClick={() => onNavigate && onNavigate(ViewState.STAMGEGEVENS)}
         />
         <StatCard 
           title="Omzet Vandaag" 
           value="€ 1.250" 
           subtext="Totaal deze week: € 8.400" 
-          icon={DollarSign} 
+          icon={Euro}
+          onClick={() => onNavigate && onNavigate(ViewState.FINANCIEEL)}
         />
         <StatCard 
           title="Zorg & Welzijn" 
           value="3" 
           subtext="Thunder, Zorro, Spirit" 
-          icon={Heart} 
+          icon={Heart}
+          onClick={() => onNavigate && onNavigate(ViewState.ZORG_WELZIJN)}
         />
       </div>
 
@@ -99,25 +130,52 @@ const Dashboard: React.FC = () => {
         <div className="bg-white p-8 rounded-3xl shadow-soft border border-transparent">
           <h3 className="text-xl font-bold text-brand-dark mb-6">Attenties</h3>
           <div className="space-y-4">
-            <div className="flex items-start p-4 bg-red-50 rounded-2xl border border-red-100/50">
+            <div className="flex flex-col p-4 bg-red-50 rounded-2xl border border-red-100/50">
+              <div className="flex items-start">
               <AlertCircle className="w-6 h-6 text-red-400 mt-0.5 flex-shrink-0" />
-              <div className="ml-4">
+                <div className="ml-4 flex-1">
                 <p className="text-sm font-bold text-red-800">Incasso Batch</p>
                 <p className="text-xs text-red-600 mt-1 leading-relaxed">De batch van 24-10 bevat 3 fouten. Controleer de gegevens.</p>
+                </div>
+              </div>
+              <div className="flex justify-end mt-3">
+                <button 
+                  onClick={() => onNavigate && onNavigate(ViewState.FINANCIEEL)}
+                  className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Bekijken
+                </button>
               </div>
             </div>
-            <div className="flex items-start p-4 bg-orange-50 rounded-2xl border border-orange-100/50">
+            <div className="flex flex-col p-4 bg-orange-50 rounded-2xl border border-orange-100/50">
+              <div className="flex items-start">
               <Activity className="w-6 h-6 text-orange-400 mt-0.5 flex-shrink-0" />
-              <div className="ml-4">
+                <div className="ml-4 flex-1">
                 <p className="text-sm font-bold text-orange-800">Vaccinaties</p>
                 <p className="text-xs text-orange-600 mt-1 leading-relaxed">Black Beauty en Bella moeten deze week gevaccineerd worden.</p>
+                </div>
+              </div>
+              <div className="flex justify-end mt-3">
+                <button className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg transition-colors">
+                  Bekijken
+                </button>
               </div>
             </div>
-            <div className="flex items-start p-4 bg-brand-bg rounded-2xl border border-brand-soft/30">
+            <div className="flex flex-col p-4 bg-brand-bg rounded-2xl border border-brand-soft/30">
+              <div className="flex items-start">
               <Users className="w-6 h-6 text-brand-primary mt-0.5 flex-shrink-0" />
-              <div className="ml-4">
+                <div className="ml-4 flex-1">
                 <p className="text-sm font-bold text-brand-dark">Nieuwe Ruiters</p>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">Er staan 4 nieuwe aanmeldingen op de wachtlijst.</p>
+                </div>
+              </div>
+              <div className="flex justify-end mt-3">
+                <button 
+                  onClick={() => onNavigate && onNavigate(ViewState.NIEUWE_AANMELDINGEN)}
+                  className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Bekijken
+                </button>
               </div>
             </div>
           </div>
