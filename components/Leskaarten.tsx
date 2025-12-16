@@ -1,22 +1,175 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Plus, CreditCard, Calendar, User, Filter, X, Clock } from 'lucide-react';
-import { Leskaart, RecurringLesson } from '../types';
-import { MOCK_MEMBERS } from '../constants';
+import { Leskaart, RecurringLesson, Member } from '../types';
+import { supabase } from '../lib/supabase';
 
 const Leskaarten: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewKaartModal, setShowNewKaartModal] = useState(false);
-  const [selectedKlant, setSelectedKlant] = useState<typeof MOCK_MEMBERS[0] | null>(null);
+  const [selectedKlant, setSelectedKlant] = useState<Member | null>(null);
   const [totaalLessen, setTotaalLessen] = useState(10);
   const [eindDatum, setEindDatum] = useState('');
+  const [leskaarten, setLeskaarten] = useState<Leskaart[]>([]);
+  const [recurringLessons, setRecurringLessons] = useState<RecurringLesson[]>([]);
+  const [allMembers, setAllMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock recurring lessons data - later uit Planning component of database halen
-  const recurringLessons: RecurringLesson[] = [
-    { id: '1', name: 'Groep1', dayOfWeek: 1, time: '14:00', type: 'Dressuurles', instructor: '', maxParticipants: 8, color: 'blue', participantIds: ['1'] },
-    { id: '2', name: 'Groep2', dayOfWeek: 1, time: '15:00', type: 'Springles', instructor: 'Marieke', maxParticipants: 8, color: 'teal', participantIds: ['2'] },
-    { id: '3', name: 'Groep3', dayOfWeek: 1, time: '16:30', type: 'Dressuurles', instructor: 'Tom', maxParticipants: 8, color: 'orange', participantIds: ['3'] },
-    { id: '4', name: 'Groep4', dayOfWeek: 2, time: '19:00', type: 'Groepsles', instructor: 'Sarah', maxParticipants: 10, color: 'amber', participantIds: ['4'] },
-  ];
+  // Haal leskaarten op uit Supabase
+  useEffect(() => {
+    const fetchLeskaarten = async () => {
+      try {
+        setLoading(true);
+        
+        // Haal leskaarten op met klant informatie
+        const { data: leskaartenData, error: leskaartenError } = await supabase
+          .from('leskaarten')
+          .select(`
+            id,
+            klant_id,
+            totaal_lessen,
+            gebruikte_lessen,
+            resterende_lessen,
+            start_datum,
+            eind_datum,
+            status,
+            created_at,
+            updated_at,
+            members:klant_id (
+              id,
+              name
+            )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (leskaartenError) {
+          console.error('Error fetching leskaarten:', leskaartenError);
+          setLeskaarten([]);
+          return;
+        }
+
+        // Map naar Leskaart interface
+        const mappedLeskaarten: Leskaart[] = (leskaartenData || []).map((lk: any) => ({
+          id: lk.id,
+          klantId: lk.klant_id,
+          klantNaam: lk.members?.name || 'Onbekend',
+          totaalLessen: lk.totaal_lessen || 0,
+          gebruikteLessen: lk.gebruikte_lessen || 0,
+          resterendeLessen: lk.resterende_lessen || 0,
+          startDatum: lk.start_datum,
+          eindDatum: lk.eind_datum,
+          status: lk.status || 'actief',
+          created_at: lk.created_at,
+          updated_at: lk.updated_at
+        }));
+
+        setLeskaarten(mappedLeskaarten);
+      } catch (error) {
+        console.error('Unexpected error fetching leskaarten:', error);
+        setLeskaarten([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLeskaarten();
+  }, []);
+
+  // Haal recurring lessons op
+  useEffect(() => {
+    const fetchRecurringLessons = async () => {
+      try {
+        const { data: lessonsData, error: lessonsError } = await supabase
+          .from('recurring_lessons')
+          .select('*')
+          .order('day_of_week', { ascending: true })
+          .order('time', { ascending: true });
+
+        if (lessonsError) {
+          console.error('Error fetching recurring lessons:', lessonsError);
+          return;
+        }
+
+        // Haal deelnemers op
+        const lessonIds = (lessonsData || []).map(l => l.id);
+        let participantsMap: Record<string, string[]> = {};
+
+        if (lessonIds.length > 0) {
+          const { data: participantsData } = await supabase
+            .from('lesson_participants')
+            .select('recurring_lesson_id, member_id')
+            .in('recurring_lesson_id', lessonIds)
+            .is('family_member_id', null);
+
+          if (participantsData) {
+            participantsMap = participantsData.reduce((acc: Record<string, string[]>, p: any) => {
+              if (!acc[p.recurring_lesson_id]) {
+                acc[p.recurring_lesson_id] = [];
+              }
+              acc[p.recurring_lesson_id].push(p.member_id);
+              return acc;
+            }, {});
+          }
+        }
+
+        const mappedLessons: RecurringLesson[] = (lessonsData || []).map((lesson: any) => ({
+          id: lesson.id,
+          name: lesson.name || 'Onbenoemde les',
+          dayOfWeek: lesson.day_of_week ?? 0,
+          time: lesson.time ? lesson.time.substring(0, 5) : '14:00',
+          type: lesson.type || 'Groepsles',
+          instructor: lesson.instructor || undefined,
+          maxParticipants: lesson.max_participants || 10,
+          color: (lesson.color || 'blue') as RecurringLesson['color'],
+          description: lesson.description || undefined,
+          participantIds: participantsMap[lesson.id] || []
+        }));
+
+        setRecurringLessons(mappedLessons);
+      } catch (error) {
+        console.error('Error fetching recurring lessons:', error);
+      }
+    };
+
+    fetchRecurringLessons();
+  }, []);
+
+  // Haal alle klanten op voor dropdown
+  useEffect(() => {
+    const fetchMembers = async () => {
+      try {
+        const { data: membersData, error: membersError } = await supabase
+          .from('members')
+          .select('*')
+          .in('klant_type', ['Manege', 'Pension'])
+          .eq('status', 'Actief')
+          .order('name', { ascending: true });
+
+        if (membersError) {
+          console.error('Error fetching members:', membersError);
+          return;
+        }
+
+        const mappedMembers: Member[] = (membersData || []).map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          email: m.email || '',
+          phone: m.phone || '',
+          status: m.status || 'Actief',
+          balance: parseFloat(m.balance) || 0,
+          klantType: m.klant_type || undefined,
+          adres: m.adres || '',
+          postcode: m.postcode || '',
+          plaats: m.plaats || ''
+        }));
+
+        setAllMembers(mappedMembers);
+      } catch (error) {
+        console.error('Error fetching members:', error);
+      }
+    };
+
+    fetchMembers();
+  }, []);
 
   const getLessenVoorKlant = (klantId: string): RecurringLesson[] => {
     return recurringLessons.filter(lesson => lesson.participantIds.includes(klantId));
@@ -27,35 +180,75 @@ const Leskaarten: React.FC = () => {
     return dagen[dayOfWeek];
   };
 
-  const [leskaarten, setLeskaarten] = useState<Leskaart[]>([]);
-
   const filteredCards = leskaarten.filter(card => 
     card.klantNaam.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleCreateLeskaart = () => {
+  const handleCreateLeskaart = async () => {
     if (!selectedKlant || !eindDatum) {
       alert('Selecteer een klant en einddatum');
       return;
     }
 
-    const newKaart: Leskaart = {
-      id: Date.now().toString(),
-      klantId: selectedKlant.id,
-      klantNaam: selectedKlant.name,
-      totaalLessen: totaalLessen,
-      gebruikteLessen: 0,
-      resterendeLessen: totaalLessen,
-      startDatum: new Date().toISOString().split('T')[0],
-      eindDatum: eindDatum,
-      status: 'actief',
-    };
+    try {
+      const startDatum = new Date().toISOString().split('T')[0];
+      
+      const { data: newKaartData, error: insertError } = await supabase
+        .from('leskaarten')
+        .insert([{
+          klant_id: selectedKlant.id,
+          totaal_lessen: totaalLessen,
+          gebruikte_lessen: 0,
+          resterende_lessen: totaalLessen,
+          start_datum: startDatum,
+          eind_datum: eindDatum,
+          status: 'actief'
+        }])
+        .select(`
+          id,
+          klant_id,
+          totaal_lessen,
+          gebruikte_lessen,
+          resterende_lessen,
+          start_datum,
+          eind_datum,
+          status,
+          created_at,
+          updated_at
+        `)
+        .single();
 
-    setLeskaarten([...leskaarten, newKaart]);
-    setShowNewKaartModal(false);
-    setSelectedKlant(null);
-    setTotaalLessen(10);
-    setEindDatum('');
+      if (insertError) {
+        console.error('Error creating leskaart:', insertError);
+        alert('Fout bij aanmaken leskaart: ' + insertError.message);
+        return;
+      }
+
+      // Voeg toe aan local state
+      const newKaart: Leskaart = {
+        id: newKaartData.id,
+        klantId: newKaartData.klant_id,
+        klantNaam: selectedKlant.name,
+        totaalLessen: newKaartData.totaal_lessen,
+        gebruikteLessen: newKaartData.gebruikte_lessen,
+        resterendeLessen: newKaartData.resterende_lessen,
+        startDatum: newKaartData.start_datum,
+        eindDatum: newKaartData.eind_datum,
+        status: newKaartData.status as 'actief' | 'opgebruikt' | 'verlopen',
+        created_at: newKaartData.created_at,
+        updated_at: newKaartData.updated_at
+      };
+
+      setLeskaarten([newKaart, ...leskaarten]);
+      setShowNewKaartModal(false);
+      setSelectedKlant(null);
+      setTotaalLessen(10);
+      setEindDatum('');
+      alert('Leskaart succesvol aangemaakt!');
+    } catch (error: any) {
+      console.error('Error:', error);
+      alert('Fout bij aanmaken leskaart: ' + error.message);
+    }
   };
 
   return (
@@ -92,8 +285,19 @@ const Leskaarten: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredCards.map((card) => {
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary mx-auto mb-4"></div>
+            <p className="text-slate-500">Leskaarten laden...</p>
+          </div>
+        ) : filteredCards.length === 0 ? (
+          <div className="text-center py-12">
+            <CreditCard className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+            <p className="text-slate-500">Geen leskaarten gevonden</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredCards.map((card) => {
             const percentage = (card.gebruikteLessen / card.totaalLessen) * 100;
             const lessenVoorKlant = getLessenVoorKlant(card.klantId);
             
@@ -158,7 +362,8 @@ const Leskaarten: React.FC = () => {
               </div>
             );
           })}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Nieuwe Leskaart Modal */}
@@ -180,13 +385,13 @@ const Leskaarten: React.FC = () => {
                 <select
                   value={selectedKlant?.id || ''}
                   onChange={(e) => {
-                    const klant = MOCK_MEMBERS.find(m => m.id === e.target.value);
+                    const klant = allMembers.find(m => m.id === e.target.value);
                     setSelectedKlant(klant || null);
                   }}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
                 >
                   <option value="">Selecteer klant...</option>
-                  {MOCK_MEMBERS.map(member => (
+                  {allMembers.map(member => (
                     <option key={member.id} value={member.id}>{member.name}</option>
                   ))}
                 </select>
