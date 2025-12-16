@@ -121,7 +121,9 @@ const Stamgegevens: React.FC = () => {
     fetchHorses();
   }, []);
 
-  const filteredHorses = horses.filter(h => h.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredHorses = horses.filter(h => 
+    h.type === 'Manege' && h.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
   
   // Filter klanten op type
   const filteredMembers = members.filter(m => {
@@ -202,8 +204,13 @@ const Stamgegevens: React.FC = () => {
                   <th className="px-8 py-5">Naam</th>
                   <th className="px-6 py-5">Contact</th>
                   <th className="px-6 py-5">Type</th>
+                  <th className="px-6 py-5">Adres</th>
+                  <th className="px-6 py-5">Postcode</th>
+                  <th className="px-6 py-5">Stad</th>
                   <th className="px-6 py-5">Status</th>
-                  <th className="px-6 py-5">Paard(en)</th>
+                  {activeTab === 'pension' && (
+                    <th className="px-6 py-5">Paard(en)</th>
+                  )}
                   <th className="px-6 py-5 text-right">Acties</th>
                 </tr>
               ) : (
@@ -221,14 +228,14 @@ const Stamgegevens: React.FC = () => {
             <tbody className="divide-y divide-slate-50">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-8 py-12 text-center text-slate-400">
+                  <td colSpan={activeTab === 'pension' ? 9 : 8} className="px-8 py-12 text-center text-slate-400">
                     Laden...
                   </td>
                 </tr>
               ) : activeTab !== 'paarden' ? (
                 filteredMembers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-8 py-12 text-center text-slate-400">
+                    <td colSpan={activeTab === 'pension' ? 9 : 8} className="px-8 py-12 text-center text-slate-400">
                       Geen {activeTab === 'pension' ? 'pension' : 'manege'} klanten gevonden
                     </td>
                   </tr>
@@ -274,6 +281,27 @@ const Stamgegevens: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-6 py-5">
+                        {(member as any).adres ? (
+                          <span className="text-slate-700 text-sm">{(member as any).adres}</span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-5">
+                        {(member as any).postcode ? (
+                          <span className="text-slate-700 text-sm">{(member as any).postcode}</span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-5">
+                        {(member as any).plaats ? (
+                          <span className="text-slate-700 text-sm">{(member as any).plaats}</span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-5">
                         <span className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
                           member.status === 'Actief' ? 'bg-green-100 text-green-700' : 
                           member.status === 'Wachtlijst' ? 'bg-orange-100 text-orange-700' : 
@@ -282,22 +310,24 @@ const Stamgegevens: React.FC = () => {
                           {member.status}
                         </span>
                       </td>
-                      <td className="px-6 py-5">
-                        {memberHorsesMap[member.id] && memberHorsesMap[member.id].length > 0 ? (
-                          <div className="flex flex-wrap gap-1.5">
-                            {memberHorsesMap[member.id].map((horseName, idx) => (
-                              <span 
-                                key={idx}
-                                className="px-2.5 py-1 rounded-lg text-xs font-medium bg-purple-50 text-purple-700 border border-purple-100"
-                              >
-                                {horseName}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 text-xs">Geen paarden</span>
-                        )}
-                      </td>
+                      {activeTab === 'pension' && (
+                        <td className="px-6 py-5">
+                          {memberHorsesMap[member.id] && memberHorsesMap[member.id].length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {memberHorsesMap[member.id].map((horseName, idx) => (
+                                <span 
+                                  key={idx}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-medium bg-purple-50 text-purple-700 border border-purple-100"
+                                >
+                                  {horseName}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-xs">Geen paarden</span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-6 py-5 text-right">
                         <button className="text-slate-300 hover:text-brand-primary transition-colors p-2 hover:bg-white rounded-full">
                           <MoreHorizontal className="w-5 h-5" />
