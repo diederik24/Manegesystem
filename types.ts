@@ -33,6 +33,27 @@ export interface Member {
   status: 'Actief' | 'Wachtlijst' | 'Inactief';
   balance: number;
   klantType?: 'Pension' | 'Manege';
+  adres?: string;
+  postcode?: string;
+  plaats?: string;
+  factuurAdres?: string;
+  factuurPostcode?: string;
+  factuurPlaats?: string;
+  factuurOntvangen?: boolean;
+  factuurEmail?: string;
+}
+
+export interface FamilyMember {
+  id: string;
+  member_id: string; // Hoofdklant die betaalt
+  name: string;
+  geboortedatum?: string;
+  email?: string;
+  telefoon?: string;
+  opmerking?: string;
+  status: 'Actief' | 'Inactief';
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Lesson {
@@ -107,6 +128,7 @@ export interface RecurringLesson {
   color: 'blue' | 'teal' | 'orange' | 'amber' | 'green' | 'purple' | 'pink' | 'indigo';
   description?: string;
   participantIds: string[]; // IDs van klanten die deelnemen
+  familyMemberIds?: string[]; // IDs van gezinsleden die deelnemen
 }
 
 export interface LessonInstance {

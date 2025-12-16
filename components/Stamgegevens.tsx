@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, MoreHorizontal, Mail, Phone, Calendar, Heart, Activity, X, Save, Edit, MapPin, User } from 'lucide-react';
+import { Search, Plus, MoreHorizontal, Mail, Phone, Calendar, Heart, Activity, X, Save, Edit, MapPin, User, BookOpen } from 'lucide-react';
 import { MOCK_HORSES } from '../constants';
 import { supabase } from '../lib/supabase';
 import { Member, Horse } from '../types';
@@ -11,6 +11,16 @@ const Stamgegevens: React.FC = () => {
   const [horses, setHorses] = useState<Horse[]>([]);
   const [loading, setLoading] = useState(true);
   const [memberHorsesMap, setMemberHorsesMap] = useState<Record<string, string[]>>({});
+  const [memberLessonsMap, setMemberLessonsMap] = useState<Record<string, Array<{
+    id: string;
+    name: string;
+    dayOfWeek: number;
+    dayName: string;
+    time: string;
+    type: string;
+    isFamilyMember?: boolean;
+    familyMemberName?: string;
+  }>>>({});
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -125,6 +135,100 @@ const Stamgegevens: React.FC = () => {
     h.type === 'Manege' && h.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
   
+  // Functie om lessen op te halen voor een specifieke klant
+  const fetchMemberLessons = async (memberId: string) => {
+    try {
+      // Haal lessen op waar deze klant als normale deelnemer in zit
+      const { data: participantsData, error: participantsError } = await supabase
+        .from('lesson_participants')
+        .select('recurring_lesson_id, family_member_id')
+        .eq('member_id', memberId)
+        .is('family_member_id', null);
+
+      if (participantsError) {
+        console.error('Error fetching participants:', participantsError);
+      }
+
+      // Haal lessen op waar deze klant via gezinsleden in zit
+      const { data: familyMembersData } = await supabase
+        .from('family_members')
+        .select('id, name')
+        .eq('member_id', memberId);
+
+      let familyMemberLessons: any[] = [];
+      if (familyMembersData && familyMembersData.length > 0) {
+        const familyMemberIds = familyMembersData.map(fm => fm.id);
+        const { data: familyParticipantsData } = await supabase
+          .from('lesson_participants')
+          .select('recurring_lesson_id, family_member_id')
+          .in('family_member_id', familyMemberIds);
+
+        if (familyParticipantsData) {
+          familyMemberLessons = familyParticipantsData;
+        }
+      }
+
+      // Combineer alle lesson IDs
+      const allLessonIds = [
+        ...(participantsData || []).map(p => p.recurring_lesson_id),
+        ...familyMemberLessons.map(p => p.recurring_lesson_id)
+      ];
+
+      if (allLessonIds.length === 0) {
+        setMemberLessonsMap(prev => ({ ...prev, [memberId]: [] }));
+        return;
+      }
+
+      // Haal les details op
+      const { data: lessonsData, error: lessonsError } = await supabase
+        .from('recurring_lessons')
+        .select('id, name, day_of_week, time, type')
+        .in('id', [...new Set(allLessonIds)]);
+
+      if (lessonsError) {
+        console.error('Error fetching lessons:', lessonsError);
+        return;
+      }
+
+      const dayNames = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+      
+      // Map lessen met informatie of het via gezinslid is
+      const mappedLessons = (lessonsData || []).map((lesson: any) => {
+        const isFamilyMemberLesson = familyMemberLessons.some(
+          p => p.recurring_lesson_id === lesson.id
+        );
+        const familyMemberParticipant = familyMemberLessons.find(
+          p => p.recurring_lesson_id === lesson.id
+        );
+        const familyMember = familyMemberParticipant 
+          ? familyMembersData?.find(fm => fm.id === familyMemberParticipant.family_member_id)
+          : null;
+
+        return {
+          id: lesson.id,
+          name: lesson.name,
+          dayOfWeek: lesson.day_of_week,
+          dayName: dayNames[lesson.day_of_week] || 'Onbekend',
+          time: lesson.time ? lesson.time.substring(0, 5) : '00:00',
+          type: lesson.type,
+          isFamilyMember: isFamilyMemberLesson,
+          familyMemberName: familyMember?.name
+        };
+      });
+
+      setMemberLessonsMap(prev => ({ ...prev, [memberId]: mappedLessons }));
+    } catch (error) {
+      console.error('Error fetching member lessons:', error);
+    }
+  };
+
+  // Wanneer een klant wordt geselecteerd, haal lessen op
+  useEffect(() => {
+    if (selectedMember && !isEditing) {
+      fetchMemberLessons(selectedMember.id);
+    }
+  }, [selectedMember, isEditing]);
+
   // Filter klanten op type
   const filteredMembers = members.filter(m => {
     const matchesSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -739,6 +843,61 @@ const Stamgegevens: React.FC = () => {
                           </span>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Lessen */}
+                  {memberLessonsMap[selectedMember.id] && memberLessonsMap[selectedMember.id].length > 0 ? (
+                    <div className="bg-brand-bg/30 rounded-2xl p-6">
+                      <h3 className="text-lg font-bold text-brand-dark mb-4 flex items-center space-x-2">
+                        <BookOpen className="w-5 h-5" />
+                        <span>Lessen ({memberLessonsMap[selectedMember.id].length})</span>
+                      </h3>
+                      <div className="space-y-3">
+                        {memberLessonsMap[selectedMember.id].map((lesson) => (
+                          <div 
+                            key={lesson.id}
+                            className="p-4 bg-white rounded-xl border border-brand-soft/50 hover:shadow-sm transition-shadow"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <p className="font-semibold text-brand-dark text-base mb-1">
+                                  {lesson.name}
+                                </p>
+                                <div className="flex items-center space-x-4 text-sm text-slate-600">
+                                  <span className="flex items-center space-x-1">
+                                    <Calendar className="w-4 h-4" />
+                                    <span>{lesson.dayName}</span>
+                                  </span>
+                                  <span>{lesson.time}</span>
+                                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                                    lesson.type === 'Pensionles' 
+                                      ? 'bg-purple-50 text-purple-700 border border-purple-100' 
+                                      : lesson.type === 'Privéles'
+                                      ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                                      : 'bg-brand-bg text-brand-primary border border-brand-soft'
+                                  }`}>
+                                    {lesson.type}
+                                  </span>
+                                </div>
+                                {lesson.isFamilyMember && lesson.familyMemberName && (
+                                  <p className="text-xs text-purple-600 mt-2">
+                                    Via gezinslid: {lesson.familyMemberName}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-brand-bg/30 rounded-2xl p-6">
+                      <h3 className="text-lg font-bold text-brand-dark mb-4 flex items-center space-x-2">
+                        <BookOpen className="w-5 h-5" />
+                        <span>Lessen</span>
+                      </h3>
+                      <p className="text-slate-400 text-sm">Geen lessen ingepland</p>
                     </div>
                   )}
                 </div>

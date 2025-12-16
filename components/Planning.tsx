@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, X, Plus, Users, Calendar, CheckCircle, XCircle, AlertCircle, Trash2, UserCheck, Edit, FileText, Download, Settings } from 'lucide-react';
-import { MOCK_MEMBERS } from '../constants';
-import { RecurringLesson, LessonInstance, Member, Leskaart, LesRegistratie, ViewState } from '../types';
+import { ChevronDown, X, Plus, Users, Calendar, CheckCircle, XCircle, AlertCircle, Trash2, UserCheck, Edit, FileText, Download, Settings, Search } from 'lucide-react';
+import { RecurringLesson, LessonInstance, Member, Leskaart, LesRegistratie, ViewState, FamilyMember } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface CalendarEvent {
   id: string;
@@ -13,7 +13,8 @@ interface CalendarEvent {
   instructor?: string;
   description?: string;
   recurringLessonId: string;
-  participantIds: string[];
+  participantIds: string[]; // Member IDs
+  familyMemberIds?: string[]; // Family member IDs
 }
 
 interface PlanningProps {
@@ -29,6 +30,10 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
   const [editedEvent, setEditedEvent] = useState<CalendarEvent | null>(null);
   const [showAddLessonModal, setShowAddLessonModal] = useState(false);
   const [showAddParticipantModal, setShowAddParticipantModal] = useState(false);
+  const [allMembers, setAllMembers] = useState<Member[]>([]);
+  const [allFamilyMembers, setAllFamilyMembers] = useState<FamilyMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(true);
+  const [participantSearchTerm, setParticipantSearchTerm] = useState('');
   // Mock leskaarten - later uit database halen
   const [leskaarten, setLeskaarten] = useState<Leskaart[]>([]);
   const [lesRegistraties, setLesRegistraties] = useState<LesRegistratie[]>([]);
@@ -42,16 +47,171 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
     return colors[(groupNumber - 1) % colors.length];
   };
 
-  const [recurringLessons, setRecurringLessons] = useState<RecurringLesson[]>([
-    { id: '1', name: 'Groep1', dayOfWeek: 1, time: '14:00', type: 'Dressuurles', instructor: '', maxParticipants: 8, color: 'blue', participantIds: [] },
-    { id: '2', name: 'Groep2', dayOfWeek: 1, time: '15:00', type: 'Springles', instructor: 'Marieke', maxParticipants: 8, color: 'teal', participantIds: [] },
-    { id: '3', name: 'Groep3', dayOfWeek: 1, time: '16:30', type: 'Dressuurles', instructor: 'Tom', maxParticipants: 8, color: 'orange', participantIds: [] },
-    { id: '4', name: 'Groep4', dayOfWeek: 2, time: '19:00', type: 'Groepsles', instructor: 'Sarah', maxParticipants: 10, color: 'amber', participantIds: [] },
-    { id: '5', name: 'Groep5', dayOfWeek: 3, time: '17:00', type: 'Privéles', instructor: 'Marieke', maxParticipants: 1, color: 'green', participantIds: [] },
-    { id: '6', name: 'Groep6', dayOfWeek: 3, time: '18:00', type: 'Dressuurles', instructor: 'Tom', maxParticipants: 8, color: 'purple', participantIds: [] },
-    { id: '7', name: 'Groep7', dayOfWeek: 4, time: '10:00', type: 'Springles', instructor: 'Marieke', maxParticipants: 8, color: 'pink', participantIds: [] },
-    { id: '8', name: 'Groep8', dayOfWeek: 4, time: '11:00', type: 'Groepsles', instructor: 'Sarah', maxParticipants: 10, color: 'indigo', participantIds: [] },
-  ]);
+  const [recurringLessons, setRecurringLessons] = useState<RecurringLesson[]>([]);
+  const [loadingLessons, setLoadingLessons] = useState(true);
+
+  // Haal recurring lessons op uit Supabase
+  useEffect(() => {
+    const fetchRecurringLessons = async () => {
+      try {
+        setLoadingLessons(true);
+        
+        // Haal lessen op
+        const { data: lessonsData, error: lessonsError } = await supabase
+          .from('recurring_lessons')
+          .select('*')
+          .order('day_of_week', { ascending: true })
+          .order('time', { ascending: true });
+
+        if (lessonsError) {
+          console.error('Error fetching recurring lessons:', lessonsError);
+          // Zet lege array zodat app niet crasht
+          setRecurringLessons([]);
+          setLoadingLessons(false);
+          return;
+        }
+
+        // Haal deelnemers op voor alle lessen (inclusief gezinsleden)
+        const lessonIds = (lessonsData || []).map(l => l.id);
+        let participantsMap: Record<string, { memberIds: string[], familyMemberIds: string[] }> = {};
+
+        if (lessonIds.length > 0) {
+          const { data: participantsData, error: participantsError } = await supabase
+            .from('lesson_participants')
+            .select('recurring_lesson_id, member_id, family_member_id')
+            .in('recurring_lesson_id', lessonIds);
+
+          if (!participantsError && participantsData) {
+            participantsMap = participantsData.reduce((acc: Record<string, { memberIds: string[], familyMemberIds: string[] }>, p: any) => {
+              if (!acc[p.recurring_lesson_id]) {
+                acc[p.recurring_lesson_id] = { memberIds: [], familyMemberIds: [] };
+              }
+              if (p.family_member_id) {
+                // Gezinslid
+                acc[p.recurring_lesson_id].familyMemberIds.push(p.family_member_id);
+              } else if (p.member_id) {
+                // Normale klant
+                acc[p.recurring_lesson_id].memberIds.push(p.member_id);
+              }
+              return acc;
+            }, {});
+          }
+        }
+
+        // Map naar RecurringLesson interface
+        const mappedLessons: RecurringLesson[] = (lessonsData || []).map((lesson: any) => {
+          // Parse tijd veilig
+          let timeStr = '14:00'; // Default
+          if (lesson.time) {
+            if (typeof lesson.time === 'string') {
+              timeStr = lesson.time.substring(0, 5); // HH:MM format
+            } else if (lesson.time instanceof Date) {
+              const hours = String(lesson.time.getHours()).padStart(2, '0');
+              const minutes = String(lesson.time.getMinutes()).padStart(2, '0');
+              timeStr = `${hours}:${minutes}`;
+            }
+          }
+          
+          return {
+            id: lesson.id,
+            name: lesson.name || 'Onbenoemde les',
+            dayOfWeek: lesson.day_of_week ?? 0,
+            time: timeStr,
+            type: lesson.type || 'Groepsles',
+            instructor: lesson.instructor || undefined,
+            maxParticipants: lesson.max_participants || 10,
+            color: (lesson.color || 'blue') as RecurringLesson['color'],
+            description: lesson.description || undefined,
+            participantIds: participantsMap[lesson.id]?.memberIds || [],
+            familyMemberIds: participantsMap[lesson.id]?.familyMemberIds || []
+          };
+        });
+
+        setRecurringLessons(mappedLessons);
+      } catch (error) {
+        console.error('Unexpected error fetching lessons:', error);
+      } finally {
+        setLoadingLessons(false);
+      }
+    };
+
+    fetchRecurringLessons();
+  }, []);
+
+  // Haal alle klanten en gezinsleden op uit Supabase
+  useEffect(() => {
+    const fetchMembers = async () => {
+      try {
+        setLoadingMembers(true);
+        
+        // Haal klanten op
+        const { data: membersData, error: membersError } = await supabase
+          .from('members')
+          .select('*')
+          .in('klant_type', ['Manege', 'Pension'])
+          .eq('status', 'Actief')
+          .order('name', { ascending: true });
+
+        if (membersError) {
+          console.error('Error fetching members:', membersError);
+          setAllMembers([]);
+          return;
+        }
+
+        const mappedMembers: Member[] = (membersData || []).map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          email: m.email || '',
+          phone: m.phone || '',
+          status: m.status || 'Actief',
+          balance: parseFloat(m.balance) || 0,
+          klantType: m.klant_type || undefined,
+          adres: m.adres || '',
+          postcode: m.postcode || '',
+          plaats: m.plaats || ''
+        }));
+
+        setAllMembers(mappedMembers);
+
+        // Haal gezinsleden op
+        const { data: familyData, error: familyError } = await supabase
+          .from('family_members')
+          .select('*')
+          .eq('status', 'Actief')
+          .order('name', { ascending: true });
+
+        if (familyError) {
+          console.error('Error fetching family members:', familyError);
+          setAllFamilyMembers([]);
+          return;
+        }
+
+        const mappedFamily: FamilyMember[] = (familyData || []).map((fm: any) => ({
+          id: fm.id,
+          member_id: fm.member_id,
+          name: fm.name,
+          geboortedatum: fm.geboortedatum || undefined,
+          email: fm.email || undefined,
+          telefoon: fm.telefoon || undefined,
+          opmerking: fm.opmerking || undefined,
+          status: fm.status || 'Actief',
+          created_at: fm.created_at,
+          updated_at: fm.updated_at
+        }));
+
+        setAllFamilyMembers(mappedFamily);
+      } catch (error) {
+        console.error('Unexpected error fetching members:', error);
+        setAllMembers([]);
+        setAllFamilyMembers([]);
+      } finally {
+        setLoadingMembers(false);
+      }
+    };
+
+    fetchMembers();
+  }, []);
+
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [newLesson, setNewLesson] = useState<Partial<RecurringLesson>>({
     name: '',
@@ -92,7 +252,8 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
           const existingRegistraties = lesRegistraties.filter(r => r.lesEventId === eventId);
           const participantIds = existingRegistraties.length > 0 
             ? existingRegistraties.map(r => r.klantId)
-            : lesson.participantIds;
+            : lesson.participantIds || [];
+          const familyMemberIds = lesson.familyMemberIds || [];
 
           events.push({
             id: eventId,
@@ -105,6 +266,7 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
             description: `${lesson.name} - ${lesson.type}`,
             recurringLessonId: lesson.id,
             participantIds: participantIds,
+            familyMemberIds: familyMemberIds,
           });
         }
         
@@ -235,25 +397,51 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
     setEditedEvent(null);
   };
 
-  const handleSaveEvent = () => {
+  const handleSaveEvent = async () => {
     if (editedEvent) {
-      setCalendarEvents(prevEvents =>
-        prevEvents.map(event =>
-          event.id === editedEvent.id ? editedEvent : event
-        )
-      );
-      
-      // Update recurring lesson participants
-      setRecurringLessons(prevLessons =>
-        prevLessons.map(lesson =>
-          lesson.id === editedEvent.recurringLessonId
-            ? { ...lesson, participantIds: editedEvent.participantIds }
-            : lesson
-        )
-      );
-      
-      setSelectedEvent(editedEvent);
-      setIsEditMode(false);
+      try {
+        // Update deelnemers in Supabase
+        const { error: deleteError } = await supabase
+          .from('lesson_participants')
+          .delete()
+          .eq('recurring_lesson_id', editedEvent.recurringLessonId);
+
+        if (deleteError) throw deleteError;
+
+        if (editedEvent.participantIds.length > 0) {
+          const participantsToInsert = editedEvent.participantIds.map(memberId => ({
+            recurring_lesson_id: editedEvent.recurringLessonId,
+            member_id: memberId
+          }));
+
+          const { error: insertError } = await supabase
+            .from('lesson_participants')
+            .insert(participantsToInsert);
+
+          if (insertError) throw insertError;
+        }
+
+        // Update local state
+        setCalendarEvents(prevEvents =>
+          prevEvents.map(event =>
+            event.id === editedEvent.id ? editedEvent : event
+          )
+        );
+        
+        setRecurringLessons(prevLessons =>
+          prevLessons.map(lesson =>
+            lesson.id === editedEvent.recurringLessonId
+              ? { ...lesson, participantIds: editedEvent.participantIds }
+              : lesson
+          )
+        );
+        
+        setSelectedEvent(editedEvent);
+        setIsEditMode(false);
+      } catch (error) {
+        console.error('Error saving event:', error);
+        alert('Fout bij opslaan van wijzigingen. Probeer het opnieuw.');
+      }
     }
   };
 
@@ -375,7 +563,7 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
     ));
   };
 
-  const handleAddRecurringLesson = () => {
+  const handleAddRecurringLesson = async () => {
     if (newLesson.name && newLesson.time) {
       const lesson: RecurringLesson = {
         id: Date.now().toString(),
@@ -390,8 +578,47 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
         participantIds: [],
       };
       
-      setRecurringLessons([...recurringLessons, lesson]);
-      setShowAddLessonModal(false);
+      // Voeg les toe aan Supabase
+      try {
+        const { data: newLessonData, error } = await supabase
+          .from('recurring_lessons')
+          .insert([{
+            name: lesson.name,
+            day_of_week: lesson.dayOfWeek,
+            time: lesson.time + ':00', // Add seconds
+            duration: 60, // Default duration
+            type: lesson.type,
+            instructor: lesson.instructor || null,
+            max_participants: lesson.maxParticipants,
+            color: lesson.color
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Voeg deelnemers toe
+        if (lesson.participantIds.length > 0) {
+          const participantsToInsert = lesson.participantIds.map(memberId => ({
+            recurring_lesson_id: newLessonData.id,
+            member_id: memberId
+          }));
+
+          await supabase
+            .from('lesson_participants')
+            .insert(participantsToInsert);
+        }
+
+        // Update local state
+        setRecurringLessons([...recurringLessons, {
+          ...lesson,
+          id: newLessonData.id
+        }]);
+        setShowAddLessonModal(false);
+      } catch (error) {
+        console.error('Error adding lesson:', error);
+        alert('Fout bij toevoegen van les. Probeer het opnieuw.');
+      }
       setNewLesson({
         name: '',
         dayOfWeek: 1,
@@ -419,7 +646,7 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
 
   const getParticipantNames = (participantIds: string[]) => {
     return participantIds
-      .map(id => MOCK_MEMBERS.find(m => m.id === id))
+      .map(id => allMembers.find(m => m.id === id))
       .filter(Boolean)
       .map(m => m!.name);
   };
@@ -473,8 +700,10 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                     className={`${getColorClasses(event.color)} text-xs p-2 rounded font-medium shadow-sm cursor-pointer hover:opacity-90 transition-opacity`}
                   >
                     {event.time} {event.group}
-                    {event.participantIds.length > 0 && (
-                      <span className="ml-1 text-xs opacity-90">({event.participantIds.length})</span>
+                    {(event.participantIds.length > 0 || (event.familyMemberIds && event.familyMemberIds.length > 0)) && (
+                      <span className="ml-1 text-xs opacity-90">
+                        ({event.participantIds.length + (event.familyMemberIds?.length || 0)})
+                      </span>
                     )}
                   </div>
                 ))}
@@ -507,6 +736,17 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
   const handleExportPlanning = () => {
     alert('Planning wordt geëxporteerd...');
   };
+
+  if (loadingLessons) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary mx-auto mb-4"></div>
+          <p className="text-slate-500">Lessen laden...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -680,7 +920,7 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                   
                   {/* Deelnemers */}
                   <div>
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-3">
                       <label className="block text-sm font-medium text-pink-500">Deelnemers</label>
                       <button
                         onClick={() => setShowAddParticipantModal(true)}
@@ -689,12 +929,15 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                         + Klant toevoegen
                       </button>
                     </div>
-                    <div className="space-y-2">
-                      {editedEvent.participantIds.length === 0 ? (
-                        <p className="text-slate-400 text-sm italic">Geen deelnemers toegevoegd</p>
-                      ) : (
-                        editedEvent.participantIds.map(memberId => {
-                          const member = MOCK_MEMBERS.find(m => m.id === memberId);
+                    <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 max-h-96 overflow-y-auto">
+                      <div className="space-y-3">
+                        {editedEvent.participantIds.length === 0 && (!editedEvent.familyMemberIds || editedEvent.familyMemberIds.length === 0) ? (
+                          <p className="text-slate-400 text-sm italic py-4 text-center">Geen deelnemers toegevoegd</p>
+                        ) : (
+                          <>
+                          {/* Normale klanten */}
+                          {editedEvent.participantIds.map(memberId => {
+                          const member = allMembers.find(m => m.id === memberId);
                           if (!member) return null;
                           
                           const registratie = lesRegistraties.find(
@@ -717,17 +960,17 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                           };
 
                           return (
-                            <div key={memberId} className="p-3 bg-slate-100 rounded-lg">
-                              <div className="flex items-start justify-between mb-2">
-                                <div>
-                                  <p className="font-medium text-slate-700">{member.name}</p>
-                                  <p className="text-xs text-slate-500">{member.email}</p>
+                            <div key={memberId} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <p className="font-semibold text-slate-800 text-base mb-1">{member.name}</p>
+                                  <p className="text-sm text-slate-500">{member.email}</p>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 ml-4">
                                   {getStatusBadge(status)}
                                   <button
                                     onClick={() => handleRemoveParticipant(memberId)}
-                                    className="text-red-500 hover:text-red-700 text-sm font-medium"
+                                    className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 hover:bg-red-50 rounded transition-colors"
                                   >
                                     Verwijderen
                                   </button>
@@ -735,31 +978,31 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                               </div>
                               {leskaart && (
                                 <div className="mt-2 pt-2 border-t border-slate-200">
-                                  <p className="text-xs text-slate-600">
+                                  <p className="text-sm text-slate-600">
                                     Leskaart: {leskaart.resterendeLessen} lessen over
                                   </p>
                                 </div>
                               )}
                               {registratie && (
-                                <div className="mt-2 flex gap-2">
+                                <div className="mt-3 flex gap-2 flex-wrap">
                                   <button
                                     onClick={() => handleWijzigLesStatus(registratie.id, 'gereden')}
                                     disabled={status === 'gereden'}
-                                    className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="text-sm px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
                                   >
                                     Gereden
                                   </button>
                                   <button
                                     onClick={() => handleWijzigLesStatus(registratie.id, 'afgezegd')}
                                     disabled={status === 'afgezegd'}
-                                    className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded hover:bg-orange-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="text-sm px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
                                   >
                                     Afgezegd
                                   </button>
                                   <button
                                     onClick={() => handleWijzigLesStatus(registratie.id, 'niet_geteld')}
                                     disabled={status === 'niet_geteld'}
-                                    className="text-xs px-2 py-1 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="text-sm px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
                                   >
                                     Niet geteld
                                   </button>
@@ -767,8 +1010,56 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                               )}
                             </div>
                           );
-                        })
-                      )}
+                        })}
+                        {/* Gezinsleden */}
+                        {editedEvent.familyMemberIds && editedEvent.familyMemberIds.map(familyMemberId => {
+                          const familyMember = allFamilyMembers.find(fm => fm.id === familyMemberId);
+                          if (!familyMember) return null;
+                          
+                          const hoofdklant = allMembers.find(m => m.id === familyMember.member_id);
+                          
+                          return (
+                            <div key={`family-${familyMemberId}`} className="p-4 bg-white border border-purple-200 rounded-lg shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <p className="font-semibold text-slate-800 text-base mb-1">
+                                    {familyMember.name}
+                                    <span className="ml-2 text-xs text-purple-600 font-normal">
+                                      (gezinslid van {hoofdklant?.name || 'onbekend'})
+                                    </span>
+                                  </p>
+                                  {familyMember.email && (
+                                    <p className="text-sm text-slate-500">{familyMember.email}</p>
+                                  )}
+                                  {hoofdklant && (
+                                    <p className="text-xs text-slate-400 mt-1">
+                                      Hoofdklant: {hoofdklant.name} ({hoofdklant.klantType || 'Onbekend'})
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 ml-4">
+                                  <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium">Gezinslid</span>
+                                  <button
+                                    onClick={() => {
+                                      if (editedEvent.familyMemberIds) {
+                                        setEditedEvent({
+                                          ...editedEvent,
+                                          familyMemberIds: editedEvent.familyMemberIds.filter(id => id !== familyMemberId)
+                                        });
+                                      }
+                                    }}
+                                    className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 hover:bg-red-50 rounded transition-colors"
+                                  >
+                                    Verwijderen
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -799,13 +1090,16 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-pink-500 mb-2">Deelnemers</label>
-                    <div className="space-y-2">
-                      {selectedEvent.participantIds.length === 0 ? (
-                        <p className="text-slate-400 text-sm italic">Geen deelnemers</p>
-                      ) : (
-                        selectedEvent.participantIds.map(memberId => {
-                          const member = MOCK_MEMBERS.find(m => m.id === memberId);
+                    <label className="block text-sm font-medium text-pink-500 mb-3">Deelnemers</label>
+                    <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 max-h-96 overflow-y-auto">
+                      <div className="space-y-3">
+                        {selectedEvent.participantIds.length === 0 && (!selectedEvent.familyMemberIds || selectedEvent.familyMemberIds.length === 0) ? (
+                          <p className="text-slate-400 text-sm italic py-4 text-center">Geen deelnemers</p>
+                        ) : (
+                          <>
+                          {/* Normale klanten */}
+                          {selectedEvent.participantIds.map(memberId => {
+                          const member = allMembers.find(m => m.id === memberId);
                           if (!member) return null;
                           
                           const registratie = lesRegistraties.find(
@@ -828,13 +1122,15 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                           };
 
                           return (
-                            <div key={memberId} className="p-3 bg-slate-100 rounded-lg">
-                              <div className="flex items-start justify-between mb-2">
-                                <div>
-                                  <p className="font-medium text-slate-700">{member.name}</p>
-                                  <p className="text-xs text-slate-500">{member.email}</p>
+                            <div key={memberId} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <p className="font-semibold text-slate-800 text-base mb-1">{member.name}</p>
+                                  <p className="text-sm text-slate-500">{member.email}</p>
                                 </div>
-                                {getStatusBadge(status)}
+                                <div className="ml-4">
+                                  {getStatusBadge(status)}
+                                </div>
                               </div>
                               {leskaart && (
                                 <div className="mt-2 pt-2 border-t border-slate-200">
@@ -870,8 +1166,43 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
                               )}
                             </div>
                           );
-                        })
-                      )}
+                        })}
+                        {/* Gezinsleden */}
+                        {selectedEvent.familyMemberIds && selectedEvent.familyMemberIds.map(familyMemberId => {
+                          const familyMember = allFamilyMembers.find(fm => fm.id === familyMemberId);
+                          if (!familyMember) return null;
+                          
+                          const hoofdklant = allMembers.find(m => m.id === familyMember.member_id);
+                          
+                          return (
+                            <div key={`family-${familyMemberId}`} className="p-4 bg-white border border-purple-200 rounded-lg shadow-sm">
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1">
+                                  <p className="font-semibold text-slate-800 text-base mb-1">
+                                    {familyMember.name}
+                                    <span className="ml-2 text-xs text-purple-600 font-normal">
+                                      (gezinslid van {hoofdklant?.name || 'onbekend'})
+                                    </span>
+                                  </p>
+                                  {familyMember.email && (
+                                    <p className="text-sm text-slate-500">{familyMember.email}</p>
+                                  )}
+                                  {hoofdklant && (
+                                    <p className="text-xs text-slate-400 mt-1">
+                                      Hoofdklant: {hoofdklant.name} ({hoofdklant.klantType || 'Onbekend'})
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="ml-4">
+                                  <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium">Gezinslid</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -921,34 +1252,83 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
 
       {/* Add Participant Modal */}
       {showAddParticipantModal && editedEvent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowAddParticipantModal(false)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => { setShowAddParticipantModal(false); setParticipantSearchTerm(''); }}>
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-slate-200">
-              <h2 className="text-xl font-bold text-brand-dark">Klant toevoegen</h2>
+              <h2 className="text-xl font-bold text-brand-dark mb-4">Klant toevoegen</h2>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Zoek op naam of e-mail..."
+                  value={participantSearchTerm}
+                  onChange={(e) => setParticipantSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-brand-bg border border-brand-soft/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all text-slate-700"
+                />
+              </div>
             </div>
             <div className="p-6 overflow-y-auto flex-1">
-              <div className="space-y-2">
-                {MOCK_MEMBERS.filter(m => !editedEvent.participantIds.includes(m.id)).map(member => (
-                  <button
-                    key={member.id}
-                    onClick={() => {
-                      handleAddParticipant(member.id);
-                      setShowAddParticipantModal(false);
-                    }}
-                    className="w-full text-left p-3 bg-brand-bg hover:bg-brand-soft rounded-lg transition-colors"
-                  >
-                    <p className="font-medium text-brand-dark">{member.name}</p>
-                    <p className="text-sm text-slate-500">{member.email}</p>
-                  </button>
-                ))}
-                {MOCK_MEMBERS.filter(m => !editedEvent.participantIds.includes(m.id)).length === 0 && (
-                  <p className="text-slate-400 text-sm italic">Alle klanten zijn al toegevoegd</p>
-                )}
-              </div>
+              {loadingMembers ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary"></div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {allMembers
+                    .filter(m => 
+                      !editedEvent.participantIds.includes(m.id) &&
+                      (participantSearchTerm === '' || 
+                       m.name.toLowerCase().includes(participantSearchTerm.toLowerCase()) ||
+                       m.email.toLowerCase().includes(participantSearchTerm.toLowerCase()))
+                    )
+                    .map(member => (
+                      <button
+                        key={member.id}
+                        onClick={() => {
+                          handleAddParticipant(member.id);
+                          setShowAddParticipantModal(false);
+                          setParticipantSearchTerm('');
+                        }}
+                        className="w-full text-left p-4 bg-brand-bg hover:bg-brand-soft rounded-lg transition-colors border border-transparent hover:border-brand-primary/30"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p className="font-semibold text-brand-dark text-base mb-1">{member.name}</p>
+                            <p className="text-sm text-slate-500 mb-1">{member.email}</p>
+                            {member.phone && (
+                              <p className="text-xs text-slate-400">{member.phone}</p>
+                            )}
+                          </div>
+                          {member.klantType && (
+                            <span className={`ml-3 px-2.5 py-1 rounded-lg text-xs font-medium ${
+                              member.klantType === 'Pension' 
+                                ? 'bg-purple-50 text-purple-700 border border-purple-100' 
+                                : 'bg-brand-bg text-brand-primary border border-brand-soft'
+                            }`}>
+                              {member.klantType}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  {allMembers.filter(m => 
+                    !editedEvent.participantIds.includes(m.id) &&
+                    (participantSearchTerm === '' || 
+                     m.name.toLowerCase().includes(participantSearchTerm.toLowerCase()) ||
+                     m.email.toLowerCase().includes(participantSearchTerm.toLowerCase()))
+                  ).length === 0 && (
+                    <div className="text-center py-8">
+                      <p className="text-slate-400 text-sm italic">
+                        {participantSearchTerm ? 'Geen klanten gevonden' : 'Alle klanten zijn al toegevoegd'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="p-6 border-t border-slate-200">
               <button
-                onClick={() => setShowAddParticipantModal(false)}
+                onClick={() => { setShowAddParticipantModal(false); setParticipantSearchTerm(''); }}
                 className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium py-3 px-4 rounded-lg transition-colors"
               >
                 Sluiten
