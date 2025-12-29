@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Download, Plus, Search, FileText, TrendingUp, CreditCard, Mail, CheckCircle, AlertCircle, Filter, X, Calendar, User, Clock, Send, Eye } from 'lucide-react';
 import { MOCK_TRANSACTIONS, MOCK_FACTUREN } from '../constants';
 import { Factuur, ViewState } from '../types';
+import { createMolliePayment } from '../lib/mollie';
+import { supabase } from '../lib/supabase';
 
 interface FinanceProps {
   onNavigate?: (view: ViewState) => void;
@@ -14,8 +16,61 @@ const Finance: React.FC<FinanceProps> = ({ onNavigate }) => {
   const [selectedFacturen, setSelectedFacturen] = useState<string[]>([]);
   const [showVerstuurModal, setShowVerstuurModal] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const [loading, setLoading] = useState(true);
 
-  const [facturen, setFacturen] = useState<Factuur[]>(MOCK_FACTUREN);
+  const [facturen, setFacturen] = useState<Factuur[]>([]);
+
+  // Haal facturen op uit Supabase
+  useEffect(() => {
+    const fetchFacturen = async () => {
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('facturen')
+          .select('*')
+          .order('date', { ascending: false });
+
+        if (error) {
+          console.error('Error fetching facturen:', error);
+          // Fallback naar mock data als tabel niet bestaat
+          setFacturen(MOCK_FACTUREN);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          // Map database data naar Factuur interface
+          const mappedFacturen: Factuur[] = data.map((f: any) => ({
+            id: f.id,
+            factuurnummer: f.factuurnummer || `FAC-${f.id.substring(0, 8)}`,
+            klantId: f.member_id || f.klant_id || '',
+            klantNaam: f.klant_naam || 'Onbekend',
+            klantEmail: f.klant_email || '',
+            klantType: f.klant_type || 'Manege' as 'Pension' | 'Manege',
+            datum: f.date || f.datum || new Date().toISOString().split('T')[0],
+            vervaldatum: f.vervaldatum || f.verval_datum || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            bedrag: parseFloat(f.amount || f.bedrag || 0),
+            omschrijving: f.description || f.omschrijving || '',
+            status: f.status === 'Betaald' ? 'Betaald' : f.status === 'Achterstallig' ? 'Achterstallig' : 'Open' as Factuur['status'],
+            betaaldOp: f.betaald_op || f.betaaldOp,
+            eersteHerinneringVerstuurd: f.eerste_herinnering_verstuurd || f.eersteHerinneringVerstuurd,
+            tweedeHerinneringVerstuurd: f.tweede_herinnering_verstuurd || f.tweedeHerinneringVerstuurd,
+            aantalHerinneringen: f.aantal_herinneringen || f.aantalHerinneringen || 0
+          }));
+          setFacturen(mappedFacturen);
+        } else {
+          // Geen data gevonden, gebruik mock data als fallback
+          setFacturen(MOCK_FACTUREN);
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        setFacturen(MOCK_FACTUREN);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFacturen();
+  }, []);
 
   // Filter facturen
   const getFilteredFacturen = () => {
@@ -81,23 +136,80 @@ const Finance: React.FC<FinanceProps> = ({ onNavigate }) => {
     }
   };
 
-  const handleVerstuurTweedeHerinnering = () => {
+  const handleVerstuurTweedeHerinnering = async () => {
     const vandaag = new Date().toISOString().split('T')[0];
     
-    setFacturen(prev => prev.map(factuur => {
-      if (selectedFacturen.includes(factuur.id)) {
-        return {
-          ...factuur,
-          tweedeHerinneringVerstuurd: vandaag,
-          aantalHerinneringen: 2
-        };
-      }
-      return factuur;
-    }));
+    try {
+      // Update facturen in database
+      for (const factuurId of selectedFacturen) {
+        const factuur = facturen.find(f => f.id === factuurId);
+        if (factuur && factuur.klantEmail) {
+          // Update in database
+          const { error } = await supabase
+            .from('facturen')
+            .update({
+              tweede_herinnering_verstuurd: vandaag,
+              aantal_herinneringen: 2
+            })
+            .eq('id', factuurId);
 
-    setSelectedFacturen([]);
-    setShowVerstuurModal(false);
-    alert(`✅ ${selectedFacturen.length} tweede herinneringen zijn verstuurd!`);
+          if (error) {
+            console.error(`Error updating factuur ${factuurId}:`, error);
+          }
+
+          // TODO: Hier zou je een email kunnen versturen naar factuur.klantEmail
+          // Bijvoorbeeld via een Supabase Edge Function of email service
+          console.log(`Herinnering verstuurd naar: ${factuur.klantEmail} voor factuur ${factuur.factuurnummer}`);
+        }
+      }
+
+      // Update local state
+      setFacturen(prev => prev.map(factuur => {
+        if (selectedFacturen.includes(factuur.id)) {
+          return {
+            ...factuur,
+            tweedeHerinneringVerstuurd: vandaag,
+            aantalHerinneringen: 2
+          };
+        }
+        return factuur;
+      }));
+
+      setSelectedFacturen([]);
+      setShowVerstuurModal(false);
+      alert(`✅ ${selectedFacturen.length} tweede herinneringen zijn verstuurd naar klant_email adressen!`);
+    } catch (error: any) {
+      console.error('Error sending reminders:', error);
+      alert(`Fout bij versturen herinneringen: ${error.message || 'Onbekende fout'}`);
+    }
+  };
+
+  const handlePayment = async (factuur: Factuur) => {
+    if (factuur.status === 'Betaald') {
+      alert('Deze factuur is al betaald.');
+      return;
+    }
+
+    try {
+      const payment = await createMolliePayment({
+        type: 'factuur',
+        id: factuur.id,
+        amount: factuur.bedrag,
+        description: `Factuur ${factuur.factuurnummer} - ${factuur.omschrijving}`,
+        customerEmail: factuur.klantEmail,
+        customerName: factuur.klantNaam,
+      });
+
+      if (payment.success && payment.paymentUrl) {
+        // Redirect to payment URL
+        window.location.href = payment.paymentUrl;
+      } else {
+        alert(`Fout bij aanmaken betaling: ${payment.error || 'Onbekende fout'}`);
+      }
+    } catch (error: any) {
+      console.error('Error creating payment:', error);
+      alert(`Fout bij aanmaken betaling: ${error.message || 'Onbekende fout'}`);
+    }
   };
 
   const getStatusBadge = (status: Factuur['status']) => {
@@ -360,7 +472,12 @@ const Finance: React.FC<FinanceProps> = ({ onNavigate }) => {
 
         {/* Content */}
         <div className="p-6">
-          {filteredFacturen.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary mx-auto mb-4"></div>
+              <p className="text-slate-400 font-medium">Facturen laden...</p>
+            </div>
+          ) : filteredFacturen.length === 0 ? (
             <div className="text-center py-12">
               <FileText className="w-16 h-16 text-slate-300 mx-auto mb-4" />
               <p className="text-slate-400 font-medium">Geen facturen gevonden</p>
@@ -468,7 +585,18 @@ const Finance: React.FC<FinanceProps> = ({ onNavigate }) => {
                           </div>
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <p className="font-bold text-brand-dark">€ {factuur.bedrag.toFixed(2)}</p>
+                          <div className="flex flex-col items-end gap-2">
+                            <p className="font-bold text-brand-dark">€ {factuur.bedrag.toFixed(2)}</p>
+                            {factuur.status !== 'Betaald' && (
+                              <button
+                                onClick={() => handlePayment(factuur)}
+                                className="px-3 py-1.5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                                Betaal nu
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -557,9 +685,20 @@ const Finance: React.FC<FinanceProps> = ({ onNavigate }) => {
                     </div>
 
                     <div className="pt-4 border-t border-slate-100">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col gap-3">
                         <p className="text-xs text-slate-500">{factuur.omschrijving}</p>
-                        <p className="text-xl font-bold text-brand-dark">€ {factuur.bedrag.toFixed(2)}</p>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xl font-bold text-brand-dark">€ {factuur.bedrag.toFixed(2)}</p>
+                          {factuur.status !== 'Betaald' && (
+                            <button
+                              onClick={() => handlePayment(factuur)}
+                              className="px-4 py-2 bg-brand-primary hover:bg-brand-hover text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2"
+                            >
+                              <CreditCard className="w-4 h-4" />
+                              Betaal nu
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

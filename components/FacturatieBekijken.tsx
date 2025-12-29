@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileText, Calendar, X, ArrowLeft, Filter } from 'lucide-react';
 import { ViewState } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface Betaalverzoek {
   id: string;
@@ -22,8 +23,55 @@ const FacturatieBekijken: React.FC<FacturatieBekijkenProps> = ({ onNavigate }) =
   const [betaalverzoekFilter, setBetaalverzoekFilter] = useState<'Alle' | 'Pension' | 'Manege'>('Alle');
   const [vanDatum, setVanDatum] = useState<string>('');
   const [totDatum, setTotDatum] = useState<string>('');
+  const [betaalverzoeken, setBetaalverzoeken] = useState<Betaalverzoek[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock data voor betaalverzoeken (later uit Supabase halen)
+  // Haal betaalverzoeken op uit Supabase
+  useEffect(() => {
+    const fetchBetaalverzoeken = async () => {
+      try {
+        setLoading(true);
+        // Probeer eerst de facturen tabel (als die bestaat met klant_naam en klant_email)
+        const { data, error } = await supabase
+          .from('facturen')
+          .select('*')
+          .order('date', { ascending: false });
+
+        if (error) {
+          console.error('Error fetching betaalverzoeken:', error);
+          setBetaalverzoeken([]);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          // Map database data naar Betaalverzoek interface
+          const mappedBetaalverzoeken: Betaalverzoek[] = data.map((f: any) => ({
+            id: f.id,
+            klantId: f.member_id || f.klant_id || '',
+            klantNaam: f.klant_naam || 'Onbekend',
+            klantType: (f.klant_type === 'Pension' ? 'Pension' : 'Manege') as 'Pension' | 'Manege',
+            datum: f.date || f.datum || new Date().toISOString().split('T')[0],
+            type: (f.type === 'Pension' ? 'Pension' : 'Leskaart') as 'Pension' | 'Leskaart',
+            bedrag: parseFloat(f.amount || f.bedrag || 0),
+            omschrijving: f.description || f.omschrijving || '',
+            status: (f.status === 'Betaald' || f.status === 'betaald' ? 'betaald' : 'verstuurd') as 'verstuurd' | 'betaald'
+          }));
+          setBetaalverzoeken(mappedBetaalverzoeken);
+        } else {
+          setBetaalverzoeken([]);
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        setBetaalverzoeken([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBetaalverzoeken();
+  }, []);
+
+  // Mock data voor betaalverzoeken (fallback als database leeg is)
   const mockBetaalverzoeken: Betaalverzoek[] = [
     {
       id: '1',
@@ -71,7 +119,10 @@ const FacturatieBekijken: React.FC<FacturatieBekijkenProps> = ({ onNavigate }) =
     }
   ];
 
-  const filteredBetaalverzoeken = mockBetaalverzoeken.filter(b => {
+  // Gebruik database data als beschikbaar, anders mock data
+  const allBetaalverzoeken = betaalverzoeken.length > 0 ? betaalverzoeken : mockBetaalverzoeken;
+
+  const filteredBetaalverzoeken = allBetaalverzoeken.filter(b => {
     // Filter op klant type
     const matchesKlantType = betaalverzoekFilter === 'Alle' || b.klantType === betaalverzoekFilter;
     
@@ -187,7 +238,12 @@ const FacturatieBekijken: React.FC<FacturatieBekijkenProps> = ({ onNavigate }) =
       </div>
 
       {/* Content */}
-      {filteredBetaalverzoeken.length === 0 ? (
+      {loading ? (
+        <div className="bg-white rounded-3xl shadow-soft border border-transparent p-12 text-center text-slate-400">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary mx-auto mb-4"></div>
+          <p className="text-lg font-medium text-brand-dark mb-2">Betaalverzoeken laden...</p>
+        </div>
+      ) : filteredBetaalverzoeken.length === 0 ? (
         <div className="bg-white rounded-3xl shadow-soft border border-transparent p-12 text-center text-slate-400">
           <FileText className="w-16 h-16 mx-auto mb-4 text-slate-300" />
           <p className="text-lg font-medium text-brand-dark mb-2">Geen betaalverzoeken gevonden</p>
