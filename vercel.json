@@ -4,10 +4,19 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "vite",
-  "rewrites": [
+  "functions": {
+    "api/get-customer-data.ts": {
+      "runtime": "@vercel/node"
+    }
+  },
+  "routes": [
     {
-      "source": "/((?!api).*)",
-      "destination": "/index.html"
+      "src": "/api/get-customer-data",
+      "dest": "/api/get-customer-data.ts"
+    },
+    {
+      "src": "/((?!api).*)",
+      "dest": "/index.html"
     }
   ]
 }
