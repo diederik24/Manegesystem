@@ -1,0 +1,132 @@
+Ik moet de Manegeplan API integreren in deze webapp zodat klanten hun eigen data kunnen bekijken via hun persoonlijke API key.
+
+API DETAILS:
+- Endpoint: GET https://jouw-domein.vercel.app/api/get-customer-data
+- Authenticatie: Header 'X-API-Key' met de API key van de klant
+- Elke klant heeft een eigen unieke API key
+
+WAT MOET ER GEBEUREN:
+
+1. API KEY LOGIN
+   - Component waar klant hun API key kan invoeren
+   - Opslaan in localStorage (of andere state management)
+   - Validatie van API key format
+
+2. DATA OPHALEN
+   - Service functie die de API aanroept met de API key
+   - Error handling voor:
+     * 401 - Ongeldige/missing API key
+     * 404 - Klant niet gevonden  
+     * Netwerkfouten
+   - Loading states tijdens API calls
+
+3. DASHBOARD COMPONENT
+   Toon de volgende data duidelijk:
+   
+   BELANGRIJKSTE INFO:
+   - Hoeveel lessen nog op leskaart staan (totaalResterendeLessen)
+   - Welke lessen ze rijden (lessons array):
+     * Les naam
+     * Dag van de week
+     * Tijd
+     * Instructeur naam
+   
+   ANDERE INFO:
+   - Persoonlijke gegevens (naam, email, telefoon)
+   - Huidig saldo (balance)
+   - Leskaarten details (per kaart: resterendeLessen, eindDatum, status)
+   - Openstaande facturen/transacties
+   - Gezinsleden (als van toepassing)
+
+RESPONSE STRUCTUUR:
+{
+  "success": true,
+  "customer": {
+    "id": "uuid",
+    "name": "Klant Naam",
+    "email": "klant@example.com",
+    "phone": "0612345678",
+    "status": "Actief",
+    "balance": 0.00,
+    "klantType": "Manege"
+  },
+  "lessons": [
+    {
+      "id": "uuid",
+      "name": "Maandag 19:00 Priveles",
+      "day": "Maandag",
+      "dayOfWeek": 0,
+      "time": "19:00",
+      "type": "Priveles",
+      "instructor": "Instructeur Naam",
+      "color": "blue"
+    }
+  ],
+  "leskaarten": [
+    {
+      "id": "uuid",
+      "totaalLessen": 10,
+      "gebruikteLessen": 3,
+      "resterendeLessen": 7,
+      "startDatum": "2024-01-01",
+      "eindDatum": "2024-12-31",
+      "status": "actief"
+    }
+  ],
+  "totaalResterendeLessen": 7,
+  "familyMembers": [],
+  "openstaandeTransacties": [],
+  "saldo": 0.00
+}
+
+ERROR RESPONSES:
+- 401: { "error": "API key required", "code": "MISSING_API_KEY" }
+- 401: { "error": "Invalid or expired API key", "code": "INVALID_API_KEY" }
+- 404: { "error": "Customer not found", "code": "CUSTOMER_NOT_FOUND" }
+
+IMPLEMENTATIE STRUCTUUR:
+
+1. api/manegeplan.ts (of .js)
+   - Functie: getCustomerData(apiKey: string)
+   - Error handling
+   - Type definitions voor response
+
+2. hooks/useCustomerData.ts (of .js)
+   - React hook die data ophaalt
+   - Loading state
+   - Error state
+   - Auto-refresh optie (optioneel)
+
+3. components/ApiKeyLogin.tsx
+   - Input veld voor API key
+   - Validatie
+   - Opslaan in localStorage
+   - Error messages
+
+4. components/CustomerDashboard.tsx
+   - Toon alle klantdata
+   - Focus op resterendeLessen en lessons
+   - Cards/sections voor verschillende data types
+   - Loading spinner
+   - Error states
+
+REQUIREMENTS:
+- TypeScript voor type safety
+- Moderne React patterns (hooks, functional components)
+- Responsive design
+- Loading states
+- Error handling
+- Gebruiksvriendelijke UI
+- Duidelijke weergave van resterendeLessen en lessen
+
+EXTRA (OPTIONEEL):
+- Auto-refresh van data (polling elke X minuten)
+- Offline support met cached data
+- Export functionaliteit
+- Notificaties voor bijna verlopen leskaarten
+
+Begin met de API service functie, dan de hook, dan de login component, en eindig met het dashboard. Maak de code modulair en herbruikbaar.
+
+
+
+
