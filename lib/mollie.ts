@@ -39,7 +39,9 @@ export async function createMolliePayment(params: CreatePaymentParams): Promise<
         description: params.description,
         customerEmail: params.customerEmail,
         customerName: params.customerName,
-        redirectUrl: params.redirectUrl || `${window.location.origin}/payment-success`,
+        // Don't override redirectUrl - let the Edge Function use the default (https://www.manegeduiksehoef.nl)
+        // Only use custom redirectUrl if explicitly provided
+        ...(params.redirectUrl && { redirectUrl: params.redirectUrl }),
       },
     });
 

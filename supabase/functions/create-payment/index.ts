@@ -1,6 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import mollieClient from 'https://esm.sh/@mollie/api-client@3.6.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -69,11 +68,15 @@ serve(async (req) => {
       );
     }
 
-    // Validate required fields
+    // Validate required fields - support both direct payments and database payments
     console.log('STEP: field_validation');
     const { type, id, amount, description, customerEmail, customerName, redirectUrl } = requestBody;
     
-    if (!type || !id || !amount || !description) {
+    // Check if this is a direct payment (amount + description) or database payment (type + id)
+    const isDirectPayment = amount && description;
+    const isDatabasePayment = type && id;
+    
+    if (!isDirectPayment && !isDatabasePayment) {
       console.log('ERROR: Missing required fields');
       console.log('TYPE:', type || 'missing');
       console.log('ID:', id || 'missing');
@@ -81,7 +84,7 @@ serve(async (req) => {
       console.log('DESCRIPTION:', description || 'missing');
       return new Response(
         JSON.stringify({ 
-          error: 'Missing required fields: type, id, amount, description',
+          error: 'Missing required fields: either (amount, description) for direct payment or (type, id) for database payment',
           code: 'MISSING_FIELDS',
           step: 'field_validation'
         }),
@@ -91,53 +94,31 @@ serve(async (req) => {
         }
       );
     }
-    console.log('SUCCESS: All required fields present');
+    console.log('SUCCESS: Required fields present');
+    console.log('PAYMENT_MODE:', isDirectPayment ? 'direct' : 'database');
 
-    // Strictly validate type field
-    console.log('STEP: type_validation');
-    if (type !== 'factuur' && type !== 'consumptie') {
-      console.log('ERROR: Invalid type value');
-      console.log('RECEIVED_TYPE:', type);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Invalid type: must be "factuur" or "consumptie"',
-          code: 'INVALID_TYPE',
-          step: 'type_validation',
-          received: type
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+    // Validate type field only if it's a database payment
+    if (isDatabasePayment) {
+      console.log('STEP: type_validation');
+      if (type !== 'factuur' && type !== 'consumptie') {
+        console.log('ERROR: Invalid type value');
+        console.log('RECEIVED_TYPE:', type);
+        return new Response(
+          JSON.stringify({ 
+            error: 'Invalid type: must be "factuur" or "consumptie"',
+            code: 'INVALID_TYPE',
+            step: 'type_validation',
+            received: type
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      console.log('SUCCESS: Type validation passed');
     }
-    console.log('SUCCESS: Type validation passed');
 
-    // Safe amount handling
-    console.log('STEP: amount_validation');
-    const amountNumber = Number(amount);
-    console.log('AMOUNT_RAW:', amount);
-    console.log('AMOUNT_NUMBER:', amountNumber);
-    if (isNaN(amountNumber) || amountNumber <= 0) {
-      console.log('ERROR: Invalid amount');
-      console.log('AMOUNT_RAW:', amount);
-      console.log('AMOUNT_NUMBER:', amountNumber);
-      console.log('IS_NAN:', isNaN(amountNumber));
-      console.log('IS_POSITIVE:', amountNumber > 0);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Invalid amount: must be a positive number',
-          code: 'INVALID_AMOUNT',
-          step: 'amount_validation',
-          received: amount
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-    console.log('SUCCESS: Amount validation passed');
 
     // Environment variable validation
     console.log('STEP: env_validation');
@@ -210,51 +191,177 @@ serve(async (req) => {
     }
     console.log('SUCCESS: All environment variables present');
 
-    // Initialize Mollie client
+    // Mollie API base URL
+    const mollieApiUrl = mollieApiKey.startsWith('test_') 
+      ? 'https://api.mollie.com/v2' 
+      : 'https://api.mollie.com/v2';
     console.log('STEP: mollie_init');
-    const mollie = mollieClient({ apiKey: mollieApiKey });
-    console.log('SUCCESS: Mollie client initialized');
+    console.log('SUCCESS: Mollie API URL configured');
 
     // Get Supabase client
     console.log('STEP: supabase_init');
     const supabaseClient = createClient(supabaseUrl, supabaseServiceRoleKey);
     console.log('SUCCESS: Supabase client initialized');
 
-    // Create payment in Mollie
+    // Determine payment details
+    console.log('STEP: payment_details');
+    let paymentAmount: number;
+    let paymentDescription: string;
+    let paymentCustomerEmail: string;
+    let paymentCustomerName: string;
+    let paymentType: string;
+    let paymentId: string;
+
+    if (isDirectPayment) {
+      // Direct payment - use provided values
+      paymentAmount = Number(amount);
+      paymentDescription = description;
+      paymentCustomerEmail = customerEmail || '';
+      paymentCustomerName = customerName || '';
+      paymentType = type || 'test';
+      paymentId = id || `test-${Date.now()}`;
+      console.log('SUCCESS: Using direct payment values');
+    } else {
+      // Database payment - fetch from database
+      console.log('FETCHING: Database payment details');
+      if (type === 'factuur') {
+        const { data: transaction, error: transactionError } = await supabaseClient
+          .from('transactions')
+          .select('amount, description, member_id')
+          .eq('id', id)
+          .single();
+
+        if (transactionError || !transaction) {
+          console.log('ERROR: Transaction not found');
+          return new Response(
+            JSON.stringify({ 
+              error: 'Transaction not found',
+              code: 'NOT_FOUND',
+              step: 'payment_details',
+              table: 'transactions',
+              id: id
+            }),
+            {
+              status: 404,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        const { data: member } = await supabaseClient
+          .from('members')
+          .select('email, name')
+          .eq('id', transaction.member_id)
+          .single();
+
+        paymentAmount = Number(transaction.amount);
+        paymentDescription = transaction.description || `Factuur ${id}`;
+        paymentCustomerEmail = member?.email || '';
+        paymentCustomerName = member?.name || '';
+        paymentType = type;
+        paymentId = id;
+        console.log('SUCCESS: Fetched transaction details');
+      } else if (type === 'consumptie') {
+        const { data: consumptie, error: consumptieError } = await supabaseClient
+          .from('consumptie_kaarten')
+          .select('totaal_bedrag, klant_id, datum')
+          .eq('id', id)
+          .single();
+
+        if (consumptieError || !consumptie) {
+          console.log('ERROR: Consumptie kaart not found');
+          return new Response(
+            JSON.stringify({ 
+              error: 'Consumptie kaart not found',
+              code: 'NOT_FOUND',
+              step: 'payment_details',
+              table: 'consumptie_kaarten',
+              id: id
+            }),
+            {
+              status: 404,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        const { data: member } = await supabaseClient
+          .from('members')
+          .select('email, name')
+          .eq('id', consumptie.klant_id)
+          .single();
+
+        paymentAmount = Number(consumptie.totaal_bedrag);
+        paymentDescription = `Consumptiekaart voor ${member?.name || ''} op ${consumptie.datum}`;
+        paymentCustomerEmail = member?.email || '';
+        paymentCustomerName = member?.name || '';
+        paymentType = type;
+        paymentId = id;
+        console.log('SUCCESS: Fetched consumptie details');
+      }
+    }
+
+    // Validate amount
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
+      console.log('ERROR: Invalid amount');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid amount: must be a positive number',
+          code: 'INVALID_AMOUNT',
+          step: 'amount_validation',
+          received: paymentAmount
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    console.log('SUCCESS: Amount validated');
+
+    // Create payment in Mollie via REST API
     console.log('STEP: mollie_payment_create');
-    console.log('PAYMENT_DATA:', JSON.stringify({
+    // Always redirect to Manege Duikse Hoef website after payment
+    const redirectUrlFinal = redirectUrl || 'https://www.manegeduiksehoef.nl';
+    
+    const paymentPayload = {
       amount: {
         currency: 'EUR',
-        value: amountNumber.toFixed(2),
+        value: paymentAmount.toFixed(2),
       },
-      description: description,
-      redirectUrl: redirectUrl || `${req.headers.get('origin') || 'http://localhost:5000'}/payment-success`,
+      description: paymentDescription,
+      redirectUrl: redirectUrlFinal,
       webhookUrl: `${supabaseUrl}/functions/v1/mollie-webhook?secret=${mollieWebhookSecret}`,
       metadata: {
-        type: type,
-        id: id,
-        customerEmail: customerEmail || '',
-        customerName: customerName || '',
+        type: paymentType,
+        id: paymentId,
+        customerEmail: paymentCustomerEmail,
+        customerName: paymentCustomerName,
       },
-    }));
+    };
+    
+    console.log('PAYMENT_DATA:', JSON.stringify(paymentPayload));
 
     let payment;
     try {
-      payment = await mollie.payments.create({
-        amount: {
-          currency: 'EUR',
-          value: amountNumber.toFixed(2),
+      const mollieResponse = await fetch(`${mollieApiUrl}/payments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${mollieApiKey}`,
         },
-        description: description,
-        redirectUrl: redirectUrl || `${req.headers.get('origin') || 'http://localhost:5000'}/payment-success`,
-        webhookUrl: `${supabaseUrl}/functions/v1/mollie-webhook?secret=${mollieWebhookSecret}`,
-        metadata: {
-          type: type,
-          id: id,
-          customerEmail: customerEmail || '',
-          customerName: customerName || '',
-        },
+        body: JSON.stringify(paymentPayload),
       });
+
+      if (!mollieResponse.ok) {
+        const errorData = await mollieResponse.json();
+        console.log('ERROR: Mollie API error');
+        console.log('ERROR_STATUS:', mollieResponse.status);
+        console.log('ERROR_DATA:', JSON.stringify(errorData));
+        throw new Error(errorData.detail || `Mollie API error: ${mollieResponse.status}`);
+      }
+
+      payment = await mollieResponse.json();
       console.log('SUCCESS: Mollie payment created');
       console.log('PAYMENT_ID:', payment.id);
       console.log('PAYMENT_STATUS:', payment.status);
@@ -278,11 +385,12 @@ serve(async (req) => {
 
     // Safe checkout URL handling
     console.log('STEP: checkout_url_validation');
-    const checkoutUrl = payment.getCheckoutUrl();
+    const checkoutUrl = payment._links?.checkout?.href;
     if (!checkoutUrl) {
       console.log('ERROR: No checkout URL returned');
       console.log('PAYMENT_ID:', payment.id);
       console.log('PAYMENT_STATUS:', payment.status);
+      console.log('PAYMENT_LINKS:', JSON.stringify(payment._links));
       return new Response(
         JSON.stringify({ 
           error: 'Mollie payment created but no checkout URL returned',
@@ -298,9 +406,9 @@ serve(async (req) => {
     }
     console.log('SUCCESS: Checkout URL obtained');
 
-    // Save payment ID to database
+    // Save payment ID to database (only for database payments)
     console.log('STEP: database_update');
-    if (type === 'factuur') {
+    if (isDatabasePayment && paymentType === 'factuur') {
       console.log('UPDATING: transactions table');
       console.log('TRANSACTION_ID:', id);
       console.log('MOLLIE_PAYMENT_ID:', payment.id);
@@ -350,7 +458,7 @@ serve(async (req) => {
       }
       console.log('SUCCESS: Transaction updated');
       console.log('UPDATED_ROWS:', data.length);
-    } else if (type === 'consumptie') {
+    } else if (isDatabasePayment && paymentType === 'consumptie') {
       console.log('UPDATING: consumptie_kaarten table');
       console.log('CONSUMPTIE_ID:', id);
       console.log('MOLLIE_PAYMENT_ID:', payment.id);
@@ -400,6 +508,8 @@ serve(async (req) => {
       }
       console.log('SUCCESS: Consumptie kaart updated');
       console.log('UPDATED_ROWS:', data.length);
+    } else if (isDirectPayment) {
+      console.log('SKIPPING: Database update (direct payment)');
     }
 
     // Return payment URL
