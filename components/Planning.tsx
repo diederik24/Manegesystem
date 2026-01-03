@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, X, Plus, Users, Calendar, CheckCircle, XCircle, AlertCircle, Trash2, UserCheck, Edit, FileText, Download, Settings, Search } from 'lucide-react';
+import { ChevronDown, X, Plus, Users, Calendar, CheckCircle, XCircle, AlertCircle, Trash2, UserCheck, Edit, FileText, Download, Settings, Search, UserX, Clock } from 'lucide-react';
 import { RecurringLesson, LessonInstance, Member, Leskaart, LesRegistratie, ViewState, FamilyMember } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -24,12 +24,17 @@ interface PlanningProps {
 const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
-  const [viewMode, setViewMode] = useState<'month' | 'quarter' | 'year'>('month');
+  const [viewMode, setViewMode] = useState<'day' | 'month' | 'quarter' | 'year'>('day');
+  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editedEvent, setEditedEvent] = useState<CalendarEvent | null>(null);
   const [showAddLessonModal, setShowAddLessonModal] = useState(false);
   const [showAddParticipantModal, setShowAddParticipantModal] = useState(false);
+  const [showDeleteLessonModal, setShowDeleteLessonModal] = useState(false);
+  const [selectedLessonsToDelete, setSelectedLessonsToDelete] = useState<string[]>([]);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelEntireLessonMode, setCancelEntireLessonMode] = useState(false);
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [allFamilyMembers, setAllFamilyMembers] = useState<FamilyMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
@@ -49,6 +54,7 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
 
   const [recurringLessons, setRecurringLessons] = useState<RecurringLesson[]>([]);
   const [loadingLessons, setLoadingLessons] = useState(true);
+  const [cancellations, setCancellations] = useState<Record<string, any>>({});
 
   // Haal recurring lessons op uit Supabase
   useEffect(() => {
@@ -136,6 +142,42 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
     };
 
     fetchRecurringLessons();
+  }, []);
+
+  // Functie om cancellations op te halen
+  const fetchCancellations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('lesson_cancellations')
+        .select('*');
+
+      if (error) {
+        console.error('Error fetching cancellations:', error);
+        return;
+      }
+
+      // Maak een map van cancellations: key = `${recurring_lesson_id}-${les_datum}`
+      const cancellationsMap: Record<string, any> = {};
+      (data || []).forEach((cancellation: any) => {
+        const key = `${cancellation.recurring_lesson_id}-${cancellation.les_datum}`;
+        if (!cancellationsMap[key]) {
+          cancellationsMap[key] = cancellation;
+        }
+      });
+
+      setCancellations(cancellationsMap);
+    } catch (error) {
+      console.error('Error fetching cancellations:', error);
+    }
+  };
+
+  // Haal cancellations op
+  useEffect(() => {
+    fetchCancellations();
+    
+    // Refresh cancellations elke 5 seconden
+    const interval = setInterval(fetchCancellations, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Haal alle klanten en gezinsleden op uit Supabase
@@ -737,6 +779,511 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
     alert('Planning wordt geëxporteerd...');
   };
 
+  const handleToggleLessonSelection = (lessonId: string) => {
+    setSelectedLessonsToDelete(prev => 
+      prev.includes(lessonId)
+        ? prev.filter(id => id !== lessonId)
+        : [...prev, lessonId]
+    );
+  };
+
+  const handleSelectAllLessons = () => {
+    if (selectedLessonsToDelete.length === recurringLessons.length) {
+      setSelectedLessonsToDelete([]);
+    } else {
+      setSelectedLessonsToDelete(recurringLessons.map(l => l.id));
+    }
+  };
+
+  const handleDeleteRecurringLessons = async () => {
+    if (selectedLessonsToDelete.length === 0) return;
+
+    try {
+      // Verwijder alle deelnemers van de geselecteerde lessen
+      const { error: participantsError } = await supabase
+        .from('lesson_participants')
+        .delete()
+        .in('recurring_lesson_id', selectedLessonsToDelete);
+
+      if (participantsError) {
+        console.error('Error deleting participants:', participantsError);
+        alert('Fout bij verwijderen van deelnemers. Probeer het opnieuw.');
+        return;
+      }
+
+      // Verwijder de lessen zelf
+      const { error: lessonError } = await supabase
+        .from('recurring_lessons')
+        .delete()
+        .in('id', selectedLessonsToDelete);
+
+      if (lessonError) {
+        console.error('Error deleting lessons:', lessonError);
+        alert('Fout bij verwijderen van lessen. Probeer het opnieuw.');
+        return;
+      }
+
+      // Update local state
+      setRecurringLessons(prev => prev.filter(l => !selectedLessonsToDelete.includes(l.id)));
+      setShowDeleteLessonModal(false);
+      setSelectedLessonsToDelete([]);
+      
+      alert(`${selectedLessonsToDelete.length} ${selectedLessonsToDelete.length === 1 ? 'les' : 'lessen'} succesvol verwijderd uit de planning`);
+    } catch (error) {
+      console.error('Error deleting lessons:', error);
+      alert('Fout bij verwijderen van lessen. Probeer het opnieuw.');
+    }
+  };
+
+  const handleCancelLesson = () => {
+    if (!selectedEvent) return;
+    setCancelEntireLessonMode(false);
+    setShowCancelModal(true);
+  };
+
+  // Functie om emails te versturen naar deelnemers bij afmelding
+  const sendCancellationEmails = async (
+    participants: Array<{ memberId?: string; familyMemberId?: string }>,
+    lessonName: string,
+    lessonDate: string,
+    lessonTime: string,
+    isAllDay: boolean = false
+  ) => {
+    try {
+      // Haal email adressen op voor alle deelnemers
+      const emailAddresses: string[] = [];
+      const participantNames: string[] = [];
+
+      for (const participant of participants) {
+        if (participant.memberId) {
+          // Normale klant
+          const { data: member } = await supabase
+            .from('members')
+            .select('email, name')
+            .eq('id', participant.memberId)
+            .single();
+
+          if (member && member.email) {
+            emailAddresses.push(member.email);
+            participantNames.push(member.name || 'Klant');
+          }
+        } else if (participant.familyMemberId) {
+          // Gezinslid - haal email van gezinslid of hoofdklant op
+          const { data: familyMember } = await supabase
+            .from('family_members')
+            .select('email, name, member_id')
+            .eq('id', participant.familyMemberId)
+            .single();
+
+          if (familyMember) {
+            // Gebruik email van gezinslid als beschikbaar, anders van hoofdklant
+            if (familyMember.email) {
+              emailAddresses.push(familyMember.email);
+              participantNames.push(familyMember.name || 'Gezinslid');
+            } else if (familyMember.member_id) {
+              const { data: hoofdklant } = await supabase
+                .from('members')
+                .select('email, name')
+                .eq('id', familyMember.member_id)
+                .single();
+
+              if (hoofdklant && hoofdklant.email) {
+                emailAddresses.push(hoofdklant.email);
+                participantNames.push(familyMember.name || 'Gezinslid');
+              }
+            }
+          }
+        }
+      }
+
+      if (emailAddresses.length === 0) {
+        console.log('Geen email adressen gevonden voor deelnemers');
+        return;
+      }
+
+      // Format datum
+      const dateObj = new Date(lessonDate);
+      const formattedDate = dateObj.toLocaleDateString('nl-NL', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+
+      // Maak email content
+      const subject = isAllDay 
+        ? `Les afgemeld - Alle lessen van ${formattedDate}`
+        : `Les afgemeld - ${lessonName} op ${formattedDate}`;
+
+      const htmlBody = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5; padding: 20px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                  <!-- Header -->
+                  <tr>
+                    <td style="background: linear-gradient(135deg, #e63946 0%, #f77f7f 100%); padding: 40px 30px; text-align: center;">
+                      <div style="width: 80px; height: 80px; background-color: rgba(255, 255, 255, 0.2); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                        <img src="https://manege-klantenwebapp.vercel.app/Logo.png" alt="Manege Duikse Hoef Logo" style="width: 100%; height: 100%; object-fit: contain; padding: 10px;" />
+                      </div>
+                      <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: bold;">Les Afgemeld</h1>
+                    </td>
+                  </tr>
+                  
+                  <!-- Content -->
+                  <tr>
+                    <td style="padding: 40px 30px;">
+                      <p style="margin: 0 0 20px; color: #333333; font-size: 16px; line-height: 1.6;">Beste ruiter,</p>
+                      
+                      <p style="margin: 0 0 25px; color: #555555; font-size: 16px; line-height: 1.6;">
+                        Helaas moeten wij u informeren dat ${isAllDay ? 'alle lessen van' : 'de les'} <strong style="color: #e63946;">${lessonName}</strong> ${isAllDay ? `op ${formattedDate}` : `op ${formattedDate} om ${lessonTime}`} is afgemeld.
+                      </p>
+                      
+                      ${isAllDay ? `<p style="margin: 0 0 25px; color: #555555; font-size: 16px; line-height: 1.6;">Alle lessen die gepland stonden voor <strong>${formattedDate}</strong> zijn geannuleerd.</p>` : ''}
+                      
+                      <!-- Les Details Box -->
+                      <div style="background: linear-gradient(135deg, #fff5f5 0%, #ffe5e5 100%); border-left: 4px solid #e63946; border-radius: 8px; padding: 20px; margin: 25px 0;">
+                        <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                          ${!isAllDay ? `
+                          <tr>
+                            <td style="padding: 8px 0; color: #333333; font-size: 15px;">
+                              <strong style="color: #e63946;">Les:</strong> ${lessonName}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding: 8px 0; color: #333333; font-size: 15px;">
+                              <strong style="color: #e63946;">Datum:</strong> ${formattedDate}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding: 8px 0; color: #333333; font-size: 15px;">
+                              <strong style="color: #e63946;">Tijd:</strong> ${lessonTime}
+                            </td>
+                          </tr>
+                          ` : `
+                          <tr>
+                            <td style="padding: 8px 0; color: #333333; font-size: 15px;">
+                              <strong style="color: #e63946;">Datum:</strong> ${formattedDate}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding: 8px 0; color: #333333; font-size: 15px;">
+                              <strong style="color: #e63946;">Status:</strong> Alle lessen geannuleerd
+                            </td>
+                          </tr>
+                          `}
+                        </table>
+                      </div>
+                      
+                      <p style="margin: 25px 0 0; color: #555555; font-size: 16px; line-height: 1.6;">
+                        Wij hopen u binnenkort weer te zien op de manege.
+                      </p>
+                    </td>
+                  </tr>
+                  
+                  <!-- Footer -->
+                  <tr>
+                    <td style="background-color: #f8f9fa; padding: 30px; text-align: center; border-top: 1px solid #e9ecef;">
+                      <p style="margin: 0 0 10px; color: #6c757d; font-size: 14px; line-height: 1.6;">
+                        <strong style="color: #e63946;">Manege Duikse Hoef</strong>
+                      </p>
+                      <p style="margin: 0; color: #6c757d; font-size: 12px; line-height: 1.6;">
+                        Met vriendelijke groet,<br>
+                        Het team van Manege Duikse Hoef
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
+      `;
+
+      const textBody = `
+Les Afgemeld
+
+Beste ruiter,
+
+Helaas moeten wij u informeren dat ${isAllDay ? 'alle lessen van' : 'de les'} ${lessonName} ${isAllDay ? `op ${formattedDate}` : `op ${formattedDate} om ${lessonTime}`} is afgemeld.
+
+${isAllDay ? `Alle lessen die gepland stonden voor ${formattedDate} zijn geannuleerd.` : ''}
+
+Les Details:
+${!isAllDay ? `Les: ${lessonName}\nDatum: ${formattedDate}\nTijd: ${lessonTime}` : `Datum: ${formattedDate}\nStatus: Alle lessen geannuleerd`}
+
+Wij hopen u binnenkort weer te zien op de manege.
+
+Met vriendelijke groet,
+Manege Duikse Hoef
+      `;
+
+      // Verstuur email via Supabase Edge Function
+      // Haal Supabase URL op uit de client
+      const supabaseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) {
+        console.error('Supabase URL niet gevonden');
+        return;
+      }
+      
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+      // Verstuur naar alle email adressen
+      const emailPromises = emailAddresses.map(async (email) => {
+        try {
+          const response = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
+              to: email,
+              subject: subject,
+              htmlBody: htmlBody,
+              textBody: textBody,
+            }),
+          });
+
+          if (!response.ok) {
+            console.error(`Fout bij versturen email naar ${email}:`, await response.text());
+          } else {
+            console.log(`Email succesvol verstuurd naar ${email}`);
+          }
+        } catch (error) {
+          console.error(`Error versturen email naar ${email}:`, error);
+        }
+      });
+
+      await Promise.all(emailPromises);
+    } catch (error) {
+      console.error('Error sending cancellation emails:', error);
+      // Fail silently - we willen niet dat email fouten de afmelding blokkeren
+    }
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!selectedEvent) return;
+
+    try {
+      const lesDatum = selectedEvent.date;
+
+      if (cancelEntireLessonMode) {
+        // Haal alle lessen van deze dag op
+        const dayEvents = getEventsForDate(new Date(lesDatum));
+        
+        // Verzamel alle cancellations voor alle lessen van deze dag
+        const allCancellations: any[] = [];
+        const allParticipantsForEmails: Array<{ memberId?: string; familyMemberId?: string; lessonName: string; lessonTime: string }> = [];
+        
+        dayEvents.forEach(event => {
+          // Haal alle deelnemers op voor deze les
+          const allParticipants: Array<{ memberId?: string; familyMemberId?: string }> = [];
+          
+          event.participantIds.forEach(memberId => {
+            allParticipants.push({ memberId });
+          });
+          
+          if (event.familyMemberIds) {
+            event.familyMemberIds.forEach(familyMemberId => {
+              allParticipants.push({ familyMemberId });
+            });
+          }
+
+          // Voeg toe voor email verzending
+          allParticipants.forEach(p => {
+            allParticipantsForEmails.push({
+              ...p,
+              lessonName: event.group,
+              lessonTime: event.time
+            });
+          });
+
+          // Voeg afmeldingen toe voor alle deelnemers van deze les
+          allParticipants.forEach(p => {
+            allCancellations.push({
+              member_id: p.memberId || null,
+              family_member_id: p.familyMemberId || null,
+              recurring_lesson_id: event.recurringLessonId,
+              les_datum: lesDatum,
+              les_tijd: event.time,
+              opmerking: 'Alle lessen van deze dag afgemeld via planning',
+              afgemeld_op: new Date().toISOString()
+            });
+          });
+        });
+
+        if (allCancellations.length === 0) {
+          alert('Geen lessen gevonden voor deze dag.');
+          return;
+        }
+
+        const { error } = await supabase
+          .from('lesson_cancellations')
+          .insert(allCancellations);
+
+        if (error) {
+          console.error('Error cancelling all lessons of day:', error);
+          alert('Fout bij afmelden van lessen. Probeer het opnieuw.');
+          return;
+        }
+
+        // Verstuur emails naar alle deelnemers
+        await sendCancellationEmails(
+          allParticipantsForEmails.map(p => ({ memberId: p.memberId, familyMemberId: p.familyMemberId })),
+          'Alle lessen',
+          lesDatum,
+          '',
+          true
+        );
+
+        setShowCancelModal(false);
+        setCancelEntireLessonMode(false);
+        handleCloseModal();
+        // Refresh cancellations
+        fetchCancellations();
+      } else {
+        // Normale afmelding: alleen deze specifieke les
+        const lesTijd = selectedEvent.time;
+
+        // Haal alle deelnemers op (zowel normale klanten als gezinsleden)
+        const allParticipants: Array<{ memberId?: string; familyMemberId?: string }> = [];
+        
+        selectedEvent.participantIds.forEach(memberId => {
+          allParticipants.push({ memberId });
+        });
+        
+        if (selectedEvent.familyMemberIds) {
+          selectedEvent.familyMemberIds.forEach(familyMemberId => {
+            allParticipants.push({ familyMemberId });
+          });
+        }
+
+        // Voeg afmeldingen toe voor alle deelnemers
+        const cancellations = allParticipants.map(p => ({
+          member_id: p.memberId || null,
+          family_member_id: p.familyMemberId || null,
+          recurring_lesson_id: selectedEvent.recurringLessonId,
+          les_datum: lesDatum,
+          les_tijd: lesTijd,
+          opmerking: 'Afgemeld via planning',
+          afgemeld_op: new Date().toISOString()
+        }));
+
+        const { error } = await supabase
+          .from('lesson_cancellations')
+          .insert(cancellations);
+
+        if (error) {
+          console.error('Error cancelling lesson:', error);
+          alert('Fout bij afmelden van les. Probeer het opnieuw.');
+          return;
+        }
+
+        // Verstuur emails naar alle deelnemers
+        await sendCancellationEmails(
+          allParticipants,
+          selectedEvent.group,
+          lesDatum,
+          lesTijd,
+          false
+        );
+
+        setShowCancelModal(false);
+        setCancelEntireLessonMode(false);
+        handleCloseModal();
+        // Refresh cancellations
+        fetchCancellations();
+      }
+    } catch (error) {
+      console.error('Error cancelling lesson:', error);
+      alert('Fout bij afmelden van les. Probeer het opnieuw.');
+    }
+  };
+
+  const handleCancelAllLessons = async () => {
+    if (!selectedEvent) return;
+
+    try {
+      // Haal alle toekomstige datums op voor deze les
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const lesson = recurringLessons.find(l => l.id === selectedEvent.recurringLessonId);
+      if (!lesson) {
+        alert('Les niet gevonden');
+        return;
+      }
+
+      // Genereer alle toekomstige datums voor deze les (volgende 3 maanden)
+      const futureDates: string[] = [];
+      const endDate = new Date(today);
+      endDate.setMonth(endDate.getMonth() + 3);
+
+      let currentDate = new Date(today);
+      while (currentDate <= endDate) {
+        const dayOfWeek = currentDate.getDay() === 0 ? 6 : currentDate.getDay() - 1;
+        if (dayOfWeek === lesson.dayOfWeek) {
+          futureDates.push(currentDate.toISOString().split('T')[0]);
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      // Haal alle deelnemers op
+      const allParticipants: Array<{ memberId?: string; familyMemberId?: string }> = [];
+      
+      selectedEvent.participantIds.forEach(memberId => {
+        allParticipants.push({ memberId });
+      });
+      
+      if (selectedEvent.familyMemberIds) {
+        selectedEvent.familyMemberIds.forEach(familyMemberId => {
+          allParticipants.push({ familyMemberId });
+        });
+      }
+
+      // Voeg afmeldingen toe voor alle deelnemers op alle toekomstige datums
+      const cancellations: any[] = [];
+      futureDates.forEach(lesDatum => {
+        allParticipants.forEach(p => {
+          cancellations.push({
+            member_id: p.memberId || null,
+            family_member_id: p.familyMemberId || null,
+            recurring_lesson_id: selectedEvent.recurringLessonId,
+            les_datum: lesDatum,
+            les_tijd: selectedEvent.time,
+            opmerking: 'Alle lessen afgemeld via planning',
+            afgemeld_op: new Date().toISOString()
+          });
+        });
+      });
+
+      const { error } = await supabase
+        .from('lesson_cancellations')
+        .insert(cancellations);
+
+      if (error) {
+        console.error('Error cancelling all lessons:', error);
+        alert('Fout bij afmelden van lessen. Probeer het opnieuw.');
+        return;
+      }
+
+      setShowCancelModal(false);
+      handleCloseModal();
+    } catch (error) {
+      console.error('Error cancelling all lessons:', error);
+      alert('Fout bij afmelden van lessen. Probeer het opnieuw.');
+    }
+  };
+
   if (loadingLessons) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -775,16 +1322,47 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
               <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-brand-dark pointer-events-none" />
             </div>
             <button
+              onClick={() => {
+                setViewMode('day');
+                setSelectedDay(new Date());
+              }}
+              className={`px-4 py-2 border border-brand-soft rounded-lg transition-colors font-medium ${
+                viewMode === 'day'
+                  ? 'bg-brand-primary text-white'
+                  : 'bg-white text-brand-dark hover:bg-brand-bg'
+              }`}
+            >
+              Dagoverzicht
+            </button>
+            <button
               onClick={() => setViewMode('quarter')}
-              className="px-4 py-2 bg-white border border-brand-soft rounded-lg text-brand-dark hover:bg-brand-bg transition-colors font-medium"
+              className={`px-4 py-2 border border-brand-soft rounded-lg transition-colors font-medium ${
+                viewMode === 'quarter'
+                  ? 'bg-brand-primary text-white'
+                  : 'bg-white text-brand-dark hover:bg-brand-bg'
+              }`}
             >
               Kwartaaloverzicht
             </button>
             <button
               onClick={() => setViewMode('year')}
-              className="px-4 py-2 bg-white border border-brand-soft rounded-lg text-brand-dark hover:bg-brand-bg transition-colors font-medium"
+              className={`px-4 py-2 border border-brand-soft rounded-lg transition-colors font-medium ${
+                viewMode === 'year'
+                  ? 'bg-brand-primary text-white'
+                  : 'bg-white text-brand-dark hover:bg-brand-bg'
+              }`}
             >
               Jaaroverzicht
+            </button>
+            <button
+              onClick={() => setViewMode('month')}
+              className={`px-4 py-2 border border-brand-soft rounded-lg transition-colors font-medium ${
+                viewMode === 'month'
+                  ? 'bg-brand-primary text-white'
+                  : 'bg-white text-brand-dark hover:bg-brand-bg'
+              }`}
+            >
+              Maandoverzicht
             </button>
           </div>
         </div>
@@ -797,6 +1375,22 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
           >
             <Plus className="w-4 h-4" />
             <span>Nieuwe Les</span>
+          </button>
+          
+          <button
+            onClick={() => setShowDeleteLessonModal(true)}
+            className="flex items-center space-x-2 px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl transition-all font-medium shadow-sm hover:shadow-md"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Les Verwijderen</span>
+          </button>
+          
+          <button
+            onClick={() => onNavigate && onNavigate(ViewState.AFMELDINGEN)}
+            className="flex items-center space-x-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl transition-all font-medium shadow-sm hover:shadow-md"
+          >
+            <UserX className="w-4 h-4" />
+            <span>Afmeldingen</span>
           </button>
           
           {selectedEvent && (
@@ -857,36 +1451,405 @@ const Planning: React.FC<PlanningProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* Days of Week Header */}
-      <div className="grid grid-cols-7 gap-2 mb-2">
-        {daysOfWeek.map((day) => (
-          <div
-            key={day}
-            className="bg-brand-soft rounded-lg p-3 text-center font-bold text-brand-primary text-sm"
-          >
-            {day}
+      {/* Day View */}
+      {viewMode === 'day' && (
+        <div className="space-y-4">
+          {/* Date Selector */}
+          <div className="flex items-center justify-between bg-white rounded-2xl shadow-soft border border-brand-soft/30 p-4">
+            <button
+              onClick={() => {
+                const prevDay = new Date(selectedDay);
+                prevDay.setDate(prevDay.getDate() - 1);
+                setSelectedDay(prevDay);
+              }}
+              className="px-4 py-2 bg-brand-soft hover:bg-brand-primary hover:text-white rounded-lg transition-colors"
+            >
+              ← Vorige dag
+            </button>
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-brand-primary">
+                {dayNames[selectedDay.getDay() === 0 ? 6 : selectedDay.getDay() - 1]} {selectedDay.getDate()} {months[selectedDay.getMonth()]} {selectedDay.getFullYear()}
+              </h2>
+            </div>
+            <button
+              onClick={() => {
+                const nextDay = new Date(selectedDay);
+                nextDay.setDate(nextDay.getDate() + 1);
+                setSelectedDay(nextDay);
+              }}
+              className="px-4 py-2 bg-brand-soft hover:bg-brand-primary hover:text-white rounded-lg transition-colors"
+            >
+              Volgende dag →
+            </button>
           </div>
-        ))}
-      </div>
 
-      {/* Calendar Grid */}
-      <div className="bg-white rounded-lg p-4">
-        {renderCalendar()}
-      </div>
+          {/* Day Events */}
+          <div className="bg-white rounded-2xl shadow-soft border border-brand-soft/30 p-6">
+            {(() => {
+              // Bereken de dag van de week voor de geselecteerde dag (Monday = 0)
+              const selectedDayOfWeek = selectedDay.getDay() === 0 ? 6 : selectedDay.getDay() - 1;
+              const selectedDateStr = selectedDay.toISOString().split('T')[0];
+              
+              // Filter lessen die op deze dag van de week vallen
+              const dayLessons = recurringLessons.filter(lesson => lesson.dayOfWeek === selectedDayOfWeek);
+              
+              // Genereer events voor deze dag
+              const dayEvents: CalendarEvent[] = dayLessons.map(lesson => {
+                const eventId = `${lesson.id}-${selectedDateStr}`;
+                
+                // Check of er bestaande registraties zijn
+                const existingRegistraties = lesRegistraties.filter(r => r.lesEventId === eventId);
+                const participantIds = existingRegistraties.length > 0 
+                  ? existingRegistraties.map(r => r.klantId)
+                  : lesson.participantIds || [];
+                const familyMemberIds = lesson.familyMemberIds || [];
+
+                return {
+                  id: eventId,
+                  date: selectedDateStr,
+                  time: lesson.time,
+                  group: lesson.name,
+                  color: lesson.color,
+                  type: lesson.type,
+                  instructor: lesson.instructor,
+                  description: `${lesson.name} - ${lesson.type}`,
+                  recurringLessonId: lesson.id,
+                  participantIds: participantIds,
+                  familyMemberIds: familyMemberIds,
+                };
+              });
+
+              // Sorteer op tijd
+              const sortedEvents = dayEvents.sort((a, b) => {
+                const timeA = a.time.split(':').map(Number);
+                const timeB = b.time.split(':').map(Number);
+                return timeA[0] * 60 + timeA[1] - (timeB[0] * 60 + timeB[1]);
+              });
+
+              if (sortedEvents.length === 0) {
+                return (
+                  <div className="text-center py-12">
+                    <Calendar className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                    <p className="text-slate-500 text-lg">Geen lessen gepland voor deze dag</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  {sortedEvents.map(event => {
+                    const totalParticipants = event.participantIds.length + (event.familyMemberIds?.length || 0);
+                    const cancellationKey = `${event.recurringLessonId}-${selectedDateStr}`;
+                    const isCancelled = !!cancellations[cancellationKey];
+                    
+                    return (
+                      <div
+                        key={event.id}
+                        onClick={() => handleEventClick(event)}
+                        className={`${getColorClasses(event.color)} p-4 rounded-xl shadow-sm cursor-pointer hover:opacity-90 transition-all hover:scale-[1.02] relative ${isCancelled ? 'opacity-75' : ''}`}
+                      >
+                        {isCancelled && (
+                          <div className="absolute top-2 right-2">
+                            <span className="bg-red-500 text-white text-xs font-semibold px-2 py-1 rounded-full shadow-md">
+                              Afgemeld
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className="text-2xl font-bold">{event.time}</div>
+                              <div>
+                                <h3 className="text-xl font-bold">{event.group}</h3>
+                                {event.type && (
+                                  <p className="text-sm opacity-90">{event.type}</p>
+                                )}
+                              </div>
+                            </div>
+                            {event.instructor && (
+                              <p className="text-sm opacity-90 mb-2">
+                                Instructeur: {event.instructor}
+                              </p>
+                            )}
+                            {totalParticipants > 0 && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <Users className="w-4 h-4 opacity-90" />
+                                <span className="text-sm opacity-90">
+                                  {totalParticipants} {totalParticipants === 1 ? 'deelnemer' : 'deelnemers'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Month/Quarter/Year View */}
+      {viewMode !== 'day' && (
+        <>
+          {/* Days of Week Header */}
+          <div className="grid grid-cols-7 gap-2 mb-2">
+            {daysOfWeek.map((day) => (
+              <div
+                key={day}
+                className="bg-brand-soft rounded-lg p-3 text-center font-bold text-brand-primary text-sm"
+              >
+                {day}
+              </div>
+            ))}
+          </div>
+
+          {/* Calendar Grid */}
+          <div className="bg-white rounded-lg p-4">
+            {renderCalendar()}
+          </div>
+        </>
+      )}
+
+      {/* Cancel Lesson Confirmation Modal */}
+      {showCancelModal && selectedEvent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] px-4" onClick={() => setShowCancelModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                  <UserX className="w-6 h-6 text-orange-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-brand-dark">Les afmelden</h2>
+              </div>
+              <button
+                onClick={() => setShowCancelModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="mb-6">
+              <div className="bg-gradient-to-r from-orange-50 to-pink-50 rounded-xl p-4 mb-4 border border-orange-200">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-orange-600" />
+                    <span className="text-sm font-medium text-slate-700">{formatDate(selectedEvent.date)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-orange-600" />
+                    <span className="text-sm font-medium text-slate-700">{selectedEvent.time}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-700">{selectedEvent.group}</span>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-slate-600 mb-4">
+                {cancelEntireLessonMode
+                  ? `Wil je alle lessen van ${formatDate(selectedEvent.date)} afmelden? Dit zal alle deelnemers (normale klanten en gezinsleden) afmelden voor alle lessen op deze dag.`
+                  : `Weet je zeker dat je deze les wilt afmelden voor alle deelnemers?`}
+              </p>
+
+              {!cancelEntireLessonMode && (
+                <button
+                  onClick={() => setCancelEntireLessonMode(true)}
+                  className="w-full py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors text-sm font-medium mb-4"
+                >
+                  Alle lessen van deze dag afmelden
+                </button>
+              )}
+
+              {cancelEntireLessonMode && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-orange-800">
+                    <strong>Let op:</strong> Dit zal alle lessen van {formatDate(selectedEvent.date)} afmelden voor alle deelnemers.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowCancelModal(false);
+                  setCancelEntireLessonMode(false);
+                }}
+                className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium py-3 px-4 rounded-lg transition-colors"
+              >
+                Annuleren
+              </button>
+              <button
+                onClick={handleConfirmCancel}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors shadow-md"
+              >
+                {cancelEntireLessonMode 
+                  ? 'Alle lessen van deze dag afmelden' 
+                  : 'Bevestig afmelding'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Lesson Modal */}
+      {showDeleteLessonModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] px-4" onClick={() => {
+          setShowDeleteLessonModal(false);
+          setSelectedLessonsToDelete([]);
+        }}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                  <Trash2 className="w-6 h-6 text-red-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-brand-dark">Lessen Verwijderen</h2>
+              </div>
+              <button
+                onClick={() => {
+                  setShowDeleteLessonModal(false);
+                  setSelectedLessonsToDelete([]);
+                }}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="mb-6 flex-1 overflow-y-auto">
+              <p className="text-slate-600 mb-4">
+                Selecteer de lessen die je permanent wilt verwijderen uit de planning. Deze actie kan niet ongedaan worden gemaakt.
+              </p>
+
+              {recurringLessons.length === 0 ? (
+                <p className="text-slate-400 text-center py-8">Geen lessen beschikbaar</p>
+              ) : (
+                <>
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-sm text-slate-600">
+                      {selectedLessonsToDelete.length} van {recurringLessons.length} lessen geselecteerd
+                    </span>
+                    <button
+                      onClick={handleSelectAllLessons}
+                      className="text-sm text-brand-primary hover:text-brand-hover font-medium"
+                    >
+                      {selectedLessonsToDelete.length === recurringLessons.length ? 'Alles deselecteren' : 'Alles selecteren'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {recurringLessons.map(lesson => {
+                      const isSelected = selectedLessonsToDelete.includes(lesson.id);
+                      return (
+                        <div
+                          key={lesson.id}
+                          onClick={() => handleToggleLessonSelection(lesson.id)}
+                          className={`w-full p-4 rounded-lg border-2 transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-red-500 bg-red-50'
+                              : 'border-slate-200 hover:border-slate-300 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                              isSelected
+                                ? 'bg-red-500 border-red-500'
+                                : 'border-slate-300'
+                            }`}>
+                              {isSelected && (
+                                <CheckCircle className="w-4 h-4 text-white" />
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <h3 className="font-semibold text-brand-dark">{lesson.name}</h3>
+                              <p className="text-sm text-slate-600">
+                                {dayNames[lesson.dayOfWeek]} om {lesson.time} • {lesson.type}
+                                {lesson.instructor && ` • ${lesson.instructor}`}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {selectedLessonsToDelete.length > 0 && (
+                <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm text-red-800">
+                    <strong>Let op:</strong> Je staat op het punt om <strong>{selectedLessonsToDelete.length} {selectedLessonsToDelete.length === 1 ? 'les' : 'lessen'}</strong> permanent te verwijderen. 
+                    Alle deelnemers en historie van deze lessen zullen ook worden verwijderd.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-4 border-t border-slate-200">
+              <button
+                onClick={() => {
+                  setShowDeleteLessonModal(false);
+                  setSelectedLessonsToDelete([]);
+                }}
+                className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium py-3 px-4 rounded-lg transition-colors"
+              >
+                Annuleren
+              </button>
+              <button
+                onClick={handleDeleteRecurringLessons}
+                disabled={selectedLessonsToDelete.length === 0}
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Verwijder {selectedLessonsToDelete.length > 0 ? `(${selectedLessonsToDelete.length})` : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Event Detail Modal */}
       {selectedEvent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCloseModal}>
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 pb-4">
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-slate-200">
               <h2 className="text-2xl font-bold text-pink-500">{selectedEvent.group}</h2>
-              <button
-                onClick={handleCloseModal}
-                className="text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                <X className="w-6 h-6" />
-              </button>
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const cancellationKey = `${selectedEvent.recurringLessonId}-${selectedEvent.date}`;
+                  const isCancelled = !!cancellations[cancellationKey];
+                  
+                  if (isCancelled) {
+                    return (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-red-100 border-2 border-red-300 rounded-lg">
+                        <UserX className="w-4 h-4 text-red-600" />
+                        <span className="text-red-700 font-semibold">Les is afgemeld</span>
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <button
+                      onClick={handleCancelLesson}
+                      className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors font-medium"
+                    >
+                      <UserX className="w-4 h-4" />
+                      <span>Les afmelden</span>
+                    </button>
+                  );
+                })()}
+                <button
+                  onClick={handleCloseModal}
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Content */}

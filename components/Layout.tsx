@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ViewState } from '../types';
 import PensionstalIcon from './PensionstalIcon';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LayoutProps {
   currentView: ViewState;
@@ -45,6 +46,12 @@ const NavItem: React.FC<{
 
 const Layout: React.FC<LayoutProps> = ({ currentView, onNavigate, children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const { signOut, user } = useAuth();
+
+  const handleLogout = async () => {
+    await signOut();
+    window.location.reload();
+  };
 
   return (
     <div className="flex h-screen bg-brand-bg overflow-hidden">
@@ -170,7 +177,11 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onNavigate, children }) =>
                  <p className="text-sm font-bold text-brand-dark truncate">Esmée Versteeg</p>
                  <p className="text-xs text-slate-500 truncate">Beheerder</p>
                </div>
-               <button className="text-slate-400 hover:text-brand-primary transition-colors">
+               <button 
+                 onClick={handleLogout}
+                 className="text-slate-400 hover:text-brand-primary transition-colors"
+                 title="Uitloggen"
+               >
                  <LogOut className="w-5 h-5" />
                </button>
              </div>
@@ -186,8 +197,12 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onNavigate, children }) =>
         {/* Mobile Header */}
         <header className="bg-white/80 backdrop-blur-md border-b border-brand-soft/30 p-4 lg:hidden flex items-center justify-between sticky top-0 z-30">
            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-brand-primary rounded-full flex items-center justify-center">
-                <Heart className="w-4 h-4 text-white fill-current" />
+              <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center overflow-hidden shadow-sm">
+                <img 
+                  src="/Logo.png" 
+                  alt="Manege Duikse Hoef Logo" 
+                  className="w-full h-full object-contain p-1"
+                />
               </div>
               <span className="text-lg font-bold text-brand-dark">Duiksehoef</span>
             </div>

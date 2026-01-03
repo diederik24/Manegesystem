@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
+import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import Planning from './components/Planning';
 import Stamgegevens from './components/Stamgegevens';
@@ -14,10 +16,25 @@ import HelpInfo from './components/HelpInfo';
 import ZorgWelzijn from './components/ZorgWelzijn';
 import PlanningBeheer from './components/PlanningBeheer';
 import FacturatieBekijken from './components/FacturatieBekijken';
+import Afmeldingen from './components/Afmeldingen';
 import { ViewState } from './types';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { user, loading } = useAuth();
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  React.useEffect(() => {
+    if (user) {
+      setIsAuthenticated(true);
+    } else {
+      setIsAuthenticated(false);
+    }
+  }, [user]);
+
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+  };
 
   const renderView = () => {
     switch (currentView) {
@@ -49,15 +66,40 @@ const App: React.FC = () => {
         return <HelpInfo onNavigate={setCurrentView} />;
       case ViewState.ZORG_WELZIJN:
         return <ZorgWelzijn />;
+      case ViewState.AFMELDINGEN:
+        return <Afmeldingen onNavigate={setCurrentView} />;
       default:
         return <Dashboard />;
     }
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-pink-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-brand-dark">Laden...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <Layout currentView={currentView} onNavigate={setCurrentView}>
       {renderView()}
     </Layout>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 };
 
