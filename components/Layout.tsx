@@ -165,6 +165,15 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onNavigate, children }) =>
               isActive={currentView === ViewState.HELP_INFO}
               onClick={() => { onNavigate(ViewState.HELP_INFO); setIsMobileMenuOpen(false); }}
             />
+            
+            <div className="mt-8 mb-4">
+              <NavItem 
+                icon={LogOut} 
+                label="Uitloggen"
+                isActive={false}
+                onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
+              />
+            </div>
           </div>
 
           {/* User Profile Footer */}

@@ -43,6 +43,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
+        options: {
+          // Maak session persistent als "onthouden" is aangevinkt
+          persistSession: rememberMe,
+        }
       });
 
       if (signInError) {
