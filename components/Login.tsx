@@ -84,23 +84,36 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-pink-50 to-white flex flex-col items-center justify-center px-4 py-8">
-      <div className="w-full max-w-md">
+    <div 
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-8 relative"
+      style={{
+        backgroundImage: 'url(/hero-banner.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      }}
+    >
+      {/* Roze gradient overlay voor betere leesbaarheid */}
+      <div 
+        className="absolute inset-0"
+        style={{
+          background: 'linear-gradient(135deg, rgba(231, 45, 129, 0.4) 0%, rgba(219, 26, 111, 0.5) 50%, rgba(147, 51, 234, 0.3) 100%)'
+        }}
+      ></div>
+      
+      {/* Content met z-index om boven overlay te zijn */}
+      <div className="relative z-10 w-full max-w-md">
         {/* Logo en Header */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-4 shadow-md overflow-hidden">
-            <img 
-              src="/Logo.png" 
-              alt="Manege Duikse Hoef Logo" 
-              className="h-20 w-20 object-contain rounded-full"
-            />
-          </div>
-          <h1 className="text-3xl font-bold text-brand-dark mb-2">Welkom</h1>
-          <p className="text-brand-primary">Manege Duiksehoef Beheer</p>
+        <div className="flex flex-col items-center mb-0 mt-16">
+          <img 
+            src="/footer-logo.png" 
+            alt="Manege Duikse Hoef Logo" 
+            className="h-52 w-auto object-contain mb-[-20px] drop-shadow-lg relative z-20"
+          />
         </div>
 
         {/* Login Form Card */}
-        <form onSubmit={handleLogin} className="bg-white rounded-2xl shadow-lg p-6 mb-6">
+        <form onSubmit={handleLogin} className="bg-white rounded-2xl shadow-lg p-6 mb-6 relative z-10">
           {/* Email Field */}
           <div className="mb-4">
             <label className="block text-brand-dark font-medium mb-2">E-mailadres</label>
