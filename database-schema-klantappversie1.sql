@@ -65,3 +65,6 @@ WHERE schema_name = 'klantappversie1';
 
 
 
+
+
+
