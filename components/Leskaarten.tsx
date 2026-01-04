@@ -1,11 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, CreditCard, Calendar, User, Filter, X, Clock } from 'lucide-react';
+import { Search, Plus, CreditCard, Calendar, User, Filter, X, Clock, CheckCircle, XCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Leskaart, RecurringLesson, Member } from '../types';
 import { supabase } from '../lib/supabase';
+
+interface LesRegistratie {
+  id: string;
+  leskaart_id: string;
+  klant_id: string;
+  les_datum: string;
+  les_tijd: string;
+  status: 'gepland' | 'gereden' | 'afgezegd' | 'niet_geteld';
+  les_type?: string;
+}
 
 const Leskaarten: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewKaartModal, setShowNewKaartModal] = useState(false);
+  const [selectedLeskaart, setSelectedLeskaart] = useState<Leskaart | null>(null);
+  const [lesRegistraties, setLesRegistraties] = useState<LesRegistratie[]>([]);
+  const [loadingRegistraties, setLoadingRegistraties] = useState(false);
   const [selectedKlant, setSelectedKlant] = useState<Member | null>(null);
   const [totaalLessen, setTotaalLessen] = useState(10);
   const [eindDatum, setEindDatum] = useState('');
@@ -180,9 +193,240 @@ const Leskaarten: React.FC = () => {
     return dagen[dayOfWeek];
   };
 
+  // Helper functie om les datums te genereren
+  // Supabase gebruikt: 0 = maandag, 1 = dinsdag, ..., 6 = zondag
+  // JavaScript gebruikt: 0 = zondag, 1 = maandag, ..., 6 = zaterdag
+  const generateLessonDates = (dayOfWeek: number, startDate: Date, endDate: Date): string[] => {
+    const dates: string[] = [];
+    const current = new Date(startDate);
+    
+    // Converteer Supabase day_of_week naar JavaScript day
+    // Supabase: 0=ma, 1=di, 2=wo, 3=do, 4=vr, 5=za, 6=zo
+    // JS: 0=zo, 1=ma, 2=di, 3=wo, 4=do, 5=vr, 6=za
+    const jsDay = dayOfWeek === 6 ? 0 : dayOfWeek + 1;
+    
+    // Ga naar de eerste dag van de week
+    while (current.getDay() !== jsDay && current <= endDate) {
+      current.setDate(current.getDate() + 1);
+    }
+
+    while (current <= endDate) {
+      dates.push(current.toISOString().split('T')[0]);
+      current.setDate(current.getDate() + 7);
+    }
+
+    return dates;
+  };
+
+  // Automatisch lessen markeren als gereden wanneer datum voorbij is
+  useEffect(() => {
+    const updateAutomaticLessonStatus = async () => {
+      try {
+        const vandaag = new Date();
+        vandaag.setHours(0, 0, 0, 0);
+        const vandaagStr = vandaag.toISOString().split('T')[0];
+        
+        // Haal alle leskaarten op die actief zijn
+        const { data: alleLeskaarten } = await supabase
+          .from('leskaarten')
+          .select('id, klant_id, start_datum, eind_datum')
+          .eq('status', 'actief');
+
+        if (!alleLeskaarten || alleLeskaarten.length === 0) return;
+
+        let hasUpdates = false;
+
+        for (const leskaart of alleLeskaarten) {
+          // Haal deelnemers op voor deze klant
+          const { data: participants } = await supabase
+            .from('lesson_participants')
+            .select('recurring_lesson_id')
+            .eq('member_id', leskaart.klant_id)
+            .is('family_member_id', null);
+
+          if (!participants || participants.length === 0) continue;
+
+          const lessonIds = participants.map(p => p.recurring_lesson_id);
+
+          // Haal recurring lessons op
+          const { data: lessons } = await supabase
+            .from('recurring_lessons')
+            .select('id, day_of_week, time, type')
+            .in('id', lessonIds);
+
+          if (!lessons || lessons.length === 0) continue;
+
+          // Genereer datums vanaf start_datum tot vandaag
+          const startDate = new Date(leskaart.start_datum);
+          const endDate = new Date(leskaart.eind_datum);
+          const today = new Date();
+          const maxDate = today < endDate ? today : endDate;
+
+          for (const lesson of lessons) {
+            // Genereer datums voor deze les
+            const datums = generateLessonDates(lesson.day_of_week, startDate, maxDate);
+
+            for (const datum of datums) {
+              if (datum > vandaagStr) continue; // Alleen verleden
+
+              // Check of er al een registratie is
+              const { data: existing } = await supabase
+                .from('les_registraties')
+                .select('id, status')
+                .eq('leskaart_id', leskaart.id)
+                .eq('les_datum', datum)
+                .eq('les_tijd', lesson.time.substring(0, 5))
+                .maybeSingle();
+
+              if (existing) continue; // Al bestaat
+
+              // Check of er een afmelding is
+              const { data: afmelding } = await supabase
+                .from('lesson_cancellations')
+                .select('id')
+                .eq('member_id', leskaart.klant_id)
+                .eq('les_datum', datum)
+                .eq('les_tijd', lesson.time.substring(0, 5))
+                .maybeSingle();
+
+              if (afmelding) continue; // Is afgemeld
+
+              // Maak registratie aan als "gereden"
+              const { data: newReg, error: insertError } = await supabase
+                .from('les_registraties')
+                .insert({
+                  leskaart_id: leskaart.id,
+                  klant_id: leskaart.klant_id,
+                  les_datum: datum,
+                  les_tijd: lesson.time.substring(0, 5),
+                  status: 'gereden',
+                  automatisch_afgeschreven: true,
+                  les_type: lesson.type
+                })
+                .select()
+                .single();
+
+              if (newReg && !insertError) {
+                hasUpdates = true;
+                
+                // Update leskaart
+                const { data: kaart } = await supabase
+                  .from('leskaarten')
+                  .select('gebruikte_lessen, resterende_lessen')
+                  .eq('id', leskaart.id)
+                  .single();
+
+                if (kaart) {
+                  const nieuweGebruikte = (kaart.gebruikte_lessen || 0) + 1;
+                  const nieuweResterende = Math.max(0, (kaart.resterende_lessen || 0) - 1);
+                  
+                  await supabase
+                    .from('leskaarten')
+                    .update({
+                      gebruikte_lessen: nieuweGebruikte,
+                      resterende_lessen: nieuweResterende,
+                      status: nieuweResterende === 0 ? 'opgebruikt' : 'actief',
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', leskaart.id);
+                }
+              }
+            }
+          }
+        }
+
+        // Refresh leskaarten alleen als er updates zijn geweest
+        if (hasUpdates) {
+          const { data: refreshed } = await supabase
+            .from('leskaarten')
+            .select(`
+              id,
+              klant_id,
+              totaal_lessen,
+              gebruikte_lessen,
+              resterende_lessen,
+              start_datum,
+              eind_datum,
+              status,
+              created_at,
+              updated_at,
+              members:klant_id (
+                id,
+                name
+              )
+            `)
+            .order('created_at', { ascending: false });
+
+          if (refreshed) {
+            const mapped = refreshed.map((lk: any) => ({
+              id: lk.id,
+              klantId: lk.klant_id,
+              klantNaam: lk.members?.name || 'Onbekend',
+              totaalLessen: lk.totaal_lessen || 0,
+              gebruikteLessen: lk.gebruikte_lessen || 0,
+              resterendeLessen: lk.resterende_lessen || 0,
+              startDatum: lk.start_datum,
+              eindDatum: lk.eind_datum,
+              status: lk.status || 'actief',
+              created_at: lk.created_at,
+              updated_at: lk.updated_at
+            }));
+            setLeskaarten(mapped);
+          }
+        }
+      } catch (error) {
+        console.error('Error updating lesson status:', error);
+      }
+    };
+
+    // Voer uit bij mount en elke 10 minuten
+    updateAutomaticLessonStatus();
+    const interval = setInterval(updateAutomaticLessonStatus, 600000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Haal lesregistraties op voor geselecteerde leskaart
+  useEffect(() => {
+    if (!selectedLeskaart) {
+      setLesRegistraties([]);
+      return;
+    }
+
+    const fetchLesRegistraties = async () => {
+      setLoadingRegistraties(true);
+      try {
+        const { data, error } = await supabase
+          .from('les_registraties')
+          .select('*')
+          .eq('leskaart_id', selectedLeskaart.id)
+          .order('les_datum', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching les registraties:', error);
+          setLesRegistraties([]);
+          return;
+        }
+
+        setLesRegistraties(data || []);
+      } catch (error) {
+        console.error('Error:', error);
+        setLesRegistraties([]);
+      } finally {
+        setLoadingRegistraties(false);
+      }
+    };
+
+    fetchLesRegistraties();
+  }, [selectedLeskaart]);
+
   const filteredCards = leskaarten.filter(card => 
     card.klantNaam.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleCardClick = (card: Leskaart) => {
+    setSelectedLeskaart(card);
+  };
 
   const handleCreateLeskaart = async () => {
     if (!selectedKlant || !eindDatum) {
@@ -302,7 +546,11 @@ const Leskaarten: React.FC = () => {
             const lessenVoorKlant = getLessenVoorKlant(card.klantId);
             
             return (
-              <div key={card.id} className="bg-gradient-to-br from-white to-brand-bg rounded-3xl p-6 shadow-soft border border-brand-soft/30 hover:border-brand-primary/30 transition-all group">
+              <div 
+                key={card.id} 
+                onClick={() => handleCardClick(card)}
+                className="bg-gradient-to-br from-white to-brand-bg rounded-3xl p-6 shadow-soft border border-brand-soft/30 hover:border-brand-primary/30 transition-all group cursor-pointer"
+              >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-3">
                     <div className="w-12 h-12 bg-brand-primary/10 rounded-2xl flex items-center justify-center group-hover:bg-brand-primary transition-colors">
@@ -432,6 +680,150 @@ const Leskaarten: React.FC = () => {
               >
                 Leskaart Aanmaken
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Leskaart Detail Modal */}
+      {selectedLeskaart && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedLeskaart(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="sticky top-0 bg-white border-b border-slate-200 p-6 flex items-center justify-between z-10">
+              <div>
+                <h2 className="text-2xl font-bold text-brand-dark">{selectedLeskaart.klantNaam}</h2>
+                <p className="text-sm text-slate-500 mt-1">Leskaart #{selectedLeskaart.id.substring(0, 8).toUpperCase()}</p>
+              </div>
+              <button onClick={() => setSelectedLeskaart(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-6">
+              {/* Leskaart Info */}
+              <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-200">
+                <div>
+                  <p className="text-sm text-slate-600">Type</p>
+                  <p className="font-semibold text-brand-dark">{selectedLeskaart.totaalLessen}x Groepsles Jeugd</p>
+                </div>
+                <div>
+                  <p className="text-sm text-slate-600">Aangemaakt</p>
+                  <p className="font-semibold text-brand-dark">
+                    {new Date(selectedLeskaart.startDatum).toLocaleDateString('nl-NL')}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-slate-600">Geldig t/m</p>
+                  <p className="font-semibold text-brand-dark">
+                    {new Date(selectedLeskaart.eindDatum).toLocaleDateString('nl-NL')}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-slate-600">Status</p>
+                  <p className="font-semibold capitalize text-brand-dark">{selectedLeskaart.status}</p>
+                </div>
+              </div>
+
+              {/* Statistieken */}
+              <div className="grid grid-cols-3 gap-4 pb-4 border-b border-slate-200">
+                <div className="text-center">
+                  <p className="text-sm text-slate-600">Totaal</p>
+                  <p className="text-2xl font-bold text-brand-dark">{selectedLeskaart.totaalLessen}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm text-slate-600">Geboekt</p>
+                  <p className="text-2xl font-bold text-brand-dark">{lesRegistraties.length}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm text-slate-600">Afgeboekt</p>
+                  <p className="text-2xl font-bold text-brand-dark">
+                    {lesRegistraties.filter(r => r.status === 'gereden').length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Lessen Grid */}
+              <div>
+                <h3 className="text-lg font-bold text-brand-dark mb-4">Groepsles</h3>
+                {loadingRegistraties ? (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary mx-auto mb-2"></div>
+                    <p className="text-slate-500">Lessen laden...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-5 gap-3 mb-4">
+                      {Array.from({ length: selectedLeskaart.totaalLessen }, (_, i) => {
+                        const lesIndex = i + 1;
+                        const registratie = lesRegistraties
+                          .filter(r => r.status !== 'afgezegd')
+                          .sort((a, b) => new Date(a.les_datum).getTime() - new Date(b.les_datum).getTime())[i];
+                        
+                        return (
+                          <div
+                            key={lesIndex}
+                            className={`p-4 rounded-lg border-2 text-center ${
+                              registratie?.status === 'gereden'
+                                ? 'bg-green-50 border-green-300 text-green-700'
+                                : registratie?.status === 'afgezegd'
+                                ? 'bg-red-50 border-red-300 text-red-700'
+                                : 'bg-slate-50 border-slate-200 text-slate-600'
+                            }`}
+                          >
+                            <div className="text-2xl font-bold mb-1">{lesIndex}</div>
+                            {registratie ? (
+                              <>
+                                <div className="text-xs font-medium mb-1">
+                                  {registratie.status === 'gereden' ? 'Gereden' : 
+                                   registratie.status === 'afgezegd' ? 'Afgezegd' : 'Gepland'}
+                                </div>
+                                <div className="text-[10px] opacity-75">
+                                  {new Date(registratie.les_datum).toLocaleDateString('nl-NL', {
+                                    weekday: 'short',
+                                    day: '2-digit',
+                                    month: '2-digit'
+                                  })}
+                                </div>
+                                <div className="text-[10px] opacity-75 mt-1">
+                                  {registratie.les_tijd}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-xs opacity-50">Nog niet gepland</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Afgezegde lessen */}
+                    {lesRegistraties.filter(r => r.status === 'afgezegd').length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-slate-200">
+                        <h4 className="text-sm font-semibold text-slate-700 mb-2">Afgezegde lessen</h4>
+                        <div className="space-y-1">
+                          {lesRegistraties
+                            .filter(r => r.status === 'afgezegd')
+                            .map((reg) => (
+                              <div key={reg.id} className="text-sm text-red-600 flex items-center space-x-2">
+                                <XCircle className="w-4 h-4" />
+                                <span>
+                                  {new Date(reg.les_datum).toLocaleDateString('nl-NL', {
+                                    weekday: 'short',
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric'
+                                  })} {reg.les_tijd} - Afgezegd
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

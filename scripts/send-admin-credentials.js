@@ -54,10 +54,10 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 async function sendAdminCredentials() {
-  const recipientEmail = 'diederik24@icloud.com';
+  const recipientEmail = 'info@mee-hestar.nl';
   const loginEmail = 'info@manegeduiksehoef.nl';
   const loginPassword = 'Duikse55!';
-  const loginUrl = 'https://manegesystem.vercel.app';
+  const loginUrl = 'http://bit.ly/3LuJlp0';
 
   console.log('📧 Versturen van inloggegevens...');
   console.log(`   Naar: ${recipientEmail}`);
@@ -173,8 +173,8 @@ async function sendAdminCredentials() {
 </head>
 <body>
   <div class="container">
-    <div class="logo-container">
-      <img src="https://manege-klantenwebapp.vercel.app/Logo.png" alt="Manege Duikse Hoef Logo">
+    <div class="logo-container" style="background-color: rgba(231, 45, 129, 0.2);">
+      <div style="font-size: 36px; font-weight: bold; color: #e72d81; letter-spacing: 2px;">MDH</div>
     </div>
     
     <h1>Welkom bij Manege Duiksehoef Beheer</h1>
@@ -199,7 +199,16 @@ async function sendAdminCredentials() {
       <strong>⚠️ Belangrijk:</strong> Bewaar deze gegevens veilig en deel ze niet met anderen. Je kunt je wachtwoord later wijzigen in de instellingen.
     </div>
     
-    <a href="${loginUrl}" class="login-button">Inloggen op Beheersysteem</a>
+    <div style="background-color: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 30px 0;">
+      <p style="color: #475569; font-size: 14px; margin-bottom: 15px; font-weight: 600;">Toegang tot het beheersysteem:</p>
+      <p style="color: #1e293b; font-size: 15px; line-height: 1.8; margin-bottom: 12px;">
+        Bezoek het beheersysteem via de volgende link:
+      </p>
+      <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
+        <a href="${loginUrl}" style="color: #e72d81; font-size: 18px; font-weight: 600; text-decoration: none; word-break: break-all; display: inline-block; padding: 10px 20px; background-color: #f8fafc; border-radius: 8px;">${loginUrl}</a>
+        <p style="color: #64748b; font-size: 12px; margin-top: 10px;">Klik op de link hierboven om naar het beheersysteem te gaan</p>
+      </div>
+    </div>
     
     <p>Je kunt nu inloggen op het beheersysteem om alle functies te gebruiken, zoals:</p>
     <ul style="color: #475569; line-height: 2;">
@@ -231,7 +240,9 @@ Wachtwoord: ${loginPassword}
 
 ⚠️ Belangrijk: Bewaar deze gegevens veilig en deel ze niet met anderen.
 
-Inloggen: ${loginUrl}
+Toegang tot het beheersysteem:
+Bezoek het beheersysteem via: ${loginUrl}
+Klik op de link hierboven om naar het beheersysteem te gaan.
 
 Je kunt nu inloggen op het beheersysteem om alle functies te gebruiken.
 
@@ -273,7 +284,6 @@ info@manegeduiksehoef.nl | +31 620685310
     console.log('\n📝 Email bevat:');
     console.log('   - Welkomstbericht');
     console.log(`   - Inloggegevens (email: ${loginEmail}, wachtwoord: ${loginPassword})`);
-    console.log(`   - Link naar beheersysteem: ${loginUrl}`);
 
   } catch (error) {
     console.error('❌ Fout:', error.message);

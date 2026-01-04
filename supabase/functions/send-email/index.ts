@@ -111,6 +111,15 @@ Tijdstip: ${new Date().toLocaleString('nl-NL')}
       subject: subject,
       text: textBody || '',
       html: htmlBody || textBody || '',
+      headers: {
+        'List-Unsubscribe': `<mailto:${gmailUser}?subject=unsubscribe>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'X-Mailer': 'Manege Duikse Hoef System',
+        'X-Priority': '1',
+        'Importance': 'normal',
+      },
+      // Voeg reply-to toe
+      replyTo: gmailUser,
     };
 
     const info = await transporter.sendMail(mailOptions);
